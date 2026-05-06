@@ -1,20 +1,12 @@
 import type { Metadata } from "next";
-import { Fraunces, Manrope } from "next/font/google";
+import { Inter } from "next/font/google";
 
 import { ClerkProvider } from "@clerk/nextjs";
 
 import { AppProviders } from "@/components/providers/app-providers";
 import "./globals.css";
 
-const manrope = Manrope({
-  variable: "--font-manrope",
-  subsets: ["latin"],
-});
-
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-});
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Automation",
@@ -33,11 +25,8 @@ export default function RootLayout({
   const content = <AppProviders>{children}</AppProviders>;
 
   return (
-    <html
-      lang="en"
-      className={`${manrope.variable} ${fraunces.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-[var(--page)] text-foreground">
+    <html lang="en" className={`${inter.className} h-full antialiased`}>
+      <body className="h-full">
         {clerkEnabled ? <ClerkProvider>{content}</ClerkProvider> : content}
       </body>
     </html>
