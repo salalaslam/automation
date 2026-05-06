@@ -39,7 +39,6 @@ import {
   PROVIDER_META,
   WorkflowRecord,
   WorkflowRunSummary,
-  WorkflowStep,
   formatTimestamp,
 } from "@/lib/workflow-model";
 import { cn } from "@/lib/utils";
@@ -132,6 +131,26 @@ function UserControls() {
     );
   }
   return <UserButton />;
+}
+
+function SignInState() {
+  return (
+    <div className="flex h-screen items-center justify-center p-6">
+      <div className="max-w-sm space-y-3 text-center">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Sign in required</p>
+          <p className="text-xs text-muted-foreground">
+            Sign in with Clerk to load your workflow workspace and connect accounts.
+          </p>
+        </div>
+        <SignInButton mode="modal">
+          <Button size="sm" className="h-8 text-xs">
+            Sign in to continue
+          </Button>
+        </SignInButton>
+      </div>
+    </div>
+  );
 }
 
 function AuthorizationDialog({
@@ -305,6 +324,10 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   }
 
   if (dashboardQuery.error) {
+    if (authEnabled && dashboardQuery.error instanceof ApiError && dashboardQuery.error.status === 401) {
+      return <SignInState />;
+    }
+
     return (
       <div className="flex h-screen items-center justify-center p-6">
         <div className="max-w-xs space-y-1">

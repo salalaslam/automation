@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 
 import { AppProviders } from "@/components/providers/app-providers";
+import { isClerkEnabled } from "@/lib/server/auth";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -13,9 +14,7 @@ export const metadata: Metadata = {
   description: "Workflow studio for Gmail and Outlook automations on Next.js, Convex, and Vercel.",
 };
 
-const clerkEnabled = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY,
-);
+const clerkEnabled = isClerkEnabled();
 
 export default function RootLayout({
   children,
