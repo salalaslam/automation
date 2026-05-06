@@ -1,6 +1,10 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  isIntegrationProvider,
+  type IntegrationProvider,
+} from "@/lib/provider-catalog";
 import { convexMutation } from "@/lib/server/convex-client";
 import {
   fetchProviderEmail,
@@ -9,10 +13,9 @@ import {
   hasOAuthCredentials,
   parseOAuthCookiePayload,
 } from "@/lib/server/oauth";
-import type { MailProvider } from "@/lib/workflow-model";
 
-function assertProvider(provider: string): MailProvider {
-  if (provider === "gmail" || provider === "outlook") {
+function assertProvider(provider: string): IntegrationProvider {
+  if (isIntegrationProvider(provider)) {
     return provider;
   }
 
@@ -98,7 +101,7 @@ export async function GET(
   await convexMutation<
     {
       ownerId: string;
-      provider: MailProvider;
+      provider: IntegrationProvider;
       email?: string;
       scopes: string[];
       accessToken: string;

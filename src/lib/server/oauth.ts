@@ -2,21 +2,50 @@ import { randomUUID } from "crypto";
 
 import type { NextRequest } from "next/server";
 
-import type { MailProvider } from "@/lib/workflow-model";
+import {
+  PROVIDER_META,
+  type IntegrationProvider,
+} from "@/lib/provider-catalog";
 
-type OAuthProviderConfig = {
+type OAuthProviderBaseConfig = {
   authorizeUrl: string;
   tokenUrl: string;
   clientId?: string;
   clientSecret?: string;
-  redirectUri: string;
   scopes: string[];
+};
+
+type OAuthProviderConfig = OAuthProviderBaseConfig & {
+  redirectUri: string;
 };
 
 type OAuthCookiePayload = {
   ownerId: string;
   state: string;
 };
+
+export type RefreshedAccessToken = {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scopes: string[];
+};
+
+export type ProviderMailboxSnapshot = {
+  provider: IntegrationProvider;
+  summary: string;
+  stats: string[];
+};
+
+export class ProviderAuthError extends Error {
+  constructor(
+    readonly provider: IntegrationProvider,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProviderAuthError";
+  }
+}
 
 function getBaseUrl(request: NextRequest) {
   const host =
@@ -34,24 +63,15 @@ function getBaseUrl(request: NextRequest) {
   return `${protocol}://${host}`;
 }
 
-export function getOAuthCookieName(provider: MailProvider) {
-  return `automation.oauth.${provider}`;
-}
-
-export function getOAuthConfig(
-  provider: MailProvider,
-  request: NextRequest,
-): OAuthProviderConfig {
-  const baseUrl = getBaseUrl(request);
-  const redirectUri = `${baseUrl}/api/connections/${provider}/callback`;
-
+function getOAuthProviderConfig(
+  provider: IntegrationProvider,
+): OAuthProviderBaseConfig {
   if (provider === "gmail") {
     return {
       authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenUrl: "https://oauth2.googleapis.com/token",
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri,
       scopes: [
         "openid",
         "email",
@@ -68,7 +88,6 @@ export function getOAuthConfig(
     tokenUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
     clientId: process.env.MICROSOFT_CLIENT_ID,
     clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
-    redirectUri,
     scopes: [
       "openid",
       "email",
@@ -77,6 +96,44 @@ export function getOAuthConfig(
       "https://graph.microsoft.com/Mail.ReadWrite",
       "https://graph.microsoft.com/User.Read",
     ],
+  };
+}
+
+async function readProviderError(response: Response) {
+  const payload = await response.text().catch(() => "");
+  return payload ? ` ${payload.slice(0, 250)}` : "";
+}
+
+async function assertProviderResponse(
+  provider: IntegrationProvider,
+  response: Response,
+  message: string,
+  authStatuses: number[] = [401, 403],
+) {
+  if (response.ok) {
+    return;
+  }
+
+  const details = await readProviderError(response);
+
+  if (authStatuses.includes(response.status)) {
+    throw new ProviderAuthError(provider, `${message}${details}`);
+  }
+
+  throw new Error(`${message}${details}`);
+}
+
+export function getOAuthCookieName(provider: IntegrationProvider) {
+  return `automation.oauth.${provider}`;
+}
+
+export function getOAuthConfig(
+  provider: IntegrationProvider,
+  request: NextRequest,
+): OAuthProviderConfig {
+  return {
+    ...getOAuthProviderConfig(provider),
+    redirectUri: `${getBaseUrl(request)}/api/connections/${provider}/callback`,
   };
 }
 
@@ -95,8 +152,62 @@ export function parseOAuthCookiePayload(payload: string): OAuthCookiePayload {
   return JSON.parse(payload) as OAuthCookiePayload;
 }
 
+export async function refreshProviderAccessToken(
+  provider: IntegrationProvider,
+  refreshToken: string,
+): Promise<RefreshedAccessToken> {
+  const config = getOAuthProviderConfig(provider);
+
+  if (!hasOAuthCredentials({ ...config, redirectUri: "unused" })) {
+    throw new Error(`${PROVIDER_META[provider].label} OAuth credentials are missing.`);
+  }
+
+  const body = new URLSearchParams({
+    client_id: config.clientId!,
+    client_secret: config.clientSecret!,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  if (provider === "outlook") {
+    body.set("scope", config.scopes.join(" "));
+  }
+
+  const response = await fetch(config.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
+
+  await assertProviderResponse(
+    provider,
+    response,
+    `Unable to refresh ${PROVIDER_META[provider].label} access.`,
+    [400, 401, 403],
+  );
+
+  const payload = (await response.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
+
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token ?? refreshToken,
+    expiresAt: payload.expires_in
+      ? Date.now() + payload.expires_in * 1000
+      : undefined,
+    scopes: payload.scope?.split(" ").filter(Boolean) ?? config.scopes,
+  };
+}
+
 export async function fetchProviderEmail(
-  provider: MailProvider,
+  provider: IntegrationProvider,
   accessToken: string,
 ) {
   if (provider === "gmail") {
@@ -135,4 +246,93 @@ export async function fetchProviderEmail(
   };
 
   return payload.mail ?? payload.userPrincipalName;
+}
+
+export async function fetchProviderMailboxSnapshot(
+  provider: IntegrationProvider,
+  accessToken: string,
+): Promise<ProviderMailboxSnapshot> {
+  if (provider === "gmail") {
+    const [profileResponse, unreadResponse] = await Promise.all([
+      fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        cache: "no-store",
+      }),
+      fetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=UNREAD&maxResults=1",
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
+        },
+      ),
+    ]);
+
+    await assertProviderResponse(
+      provider,
+      profileResponse,
+      "Unable to load Gmail mailbox details.",
+    );
+    await assertProviderResponse(
+      provider,
+      unreadResponse,
+      "Unable to load Gmail unread counts.",
+    );
+
+    const profile = (await profileResponse.json()) as {
+      emailAddress?: string;
+      messagesTotal?: number;
+      threadsTotal?: number;
+    };
+    const unreadPayload = (await unreadResponse.json()) as {
+      resultSizeEstimate?: number;
+    };
+    const unreadCount = unreadPayload.resultSizeEstimate ?? 0;
+
+    return {
+      provider,
+      summary: `Gmail inbox reachable for ${profile.emailAddress ?? "your account"} with ${unreadCount} unread messages.`,
+      stats: [
+        `${unreadCount} unread`,
+        `${profile.messagesTotal ?? 0} total messages`,
+        `${profile.threadsTotal ?? 0} total threads`,
+      ],
+    };
+  }
+
+  const inboxResponse = await fetch(
+    "https://graph.microsoft.com/v1.0/me/mailFolders/inbox?$select=displayName,totalItemCount,unreadItemCount",
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: "no-store",
+    },
+  );
+
+  await assertProviderResponse(
+    provider,
+    inboxResponse,
+    "Unable to load Outlook inbox details.",
+  );
+
+  const inbox = (await inboxResponse.json()) as {
+    displayName?: string;
+    totalItemCount?: number;
+    unreadItemCount?: number;
+  };
+
+  return {
+    provider,
+    summary: `${PROVIDER_META[provider].label} reachable for ${
+      inbox.displayName ?? "Inbox"
+    } with ${inbox.unreadItemCount ?? 0} unread messages.`,
+    stats: [
+      `${inbox.unreadItemCount ?? 0} unread`,
+      `${inbox.totalItemCount ?? 0} total inbox items`,
+    ],
+  };
 }

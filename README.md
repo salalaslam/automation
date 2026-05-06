@@ -14,13 +14,15 @@ Workflow studio for Gmail and Outlook built with Next.js App Router, Convex, Tan
 
 - Gmail and Outlook are the only supported workflow providers
 - Turning a workflow on checks required mailbox connections first
-- Gmail and Outlook OAuth routes are scaffolded now
+- Gmail and Outlook OAuth is live, including token refresh handling and reconnect state
+- Test runs perform live inbox checks against Gmail and Microsoft Graph before writing run summaries
+- Provider metadata and server runtime helpers are organized so new connectors can plug in later
 - Workflow generation is stubbed with deterministic templates for now
 
 ## Local development
 
 1. Copy `.env.example` to `.env.local`.
-2. Fill in your Clerk, Google, and Microsoft credentials.
+2. Fill in your Clerk, Google, and Microsoft credentials. Google and Microsoft keys are required for live OAuth and mailbox test runs.
 3. Start a local Convex deployment:
 
 ```bash

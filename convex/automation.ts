@@ -42,6 +42,23 @@ const workflowDraftValidator = v.object({
 
 const PROVIDERS = ["gmail", "outlook"] as const;
 
+function isConnectionReady(connection: { status: "connected" | "disconnected" | "needs_reconnect" }) {
+  return connection.status === "connected";
+}
+
+function getConnectedProviders(
+  connections: Array<{
+    provider: "gmail" | "outlook";
+    status: "connected" | "disconnected" | "needs_reconnect";
+  }>,
+) {
+  return new Set(
+    connections
+      .filter(isConnectionReady)
+      .map((connection) => connection.provider),
+  );
+}
+
 function seedWorkflowDraft() {
   const now = Date.now();
 
@@ -120,8 +137,10 @@ export const ensureWorkspace = mutation({
         await ctx.db.insert("connections", {
           ownerId: args.ownerId,
           provider,
+          category: "mail",
           status: "disconnected",
           scopes: [],
+          canRefresh: false,
           updatedAt: Date.now(),
         });
       }
@@ -170,9 +189,21 @@ export const getDashboard = query({
 
     return {
       workflows: workflows.sort((left, right) => right.updatedAt - left.updatedAt),
-      connections: connections.sort((left, right) =>
-        left.provider.localeCompare(right.provider),
-      ),
+      connections: connections
+        .sort((left, right) => left.provider.localeCompare(right.provider))
+        .map((connection) => ({
+          provider: connection.provider,
+          category: connection.category ?? "mail",
+          status: connection.status,
+          email: connection.email,
+          scopes: connection.scopes,
+          canRefresh: connection.canRefresh ?? Boolean(connection.refreshToken),
+          expiresAt: connection.expiresAt,
+          connectedAt: connection.connectedAt,
+          lastError: connection.lastError,
+          lastSyncedAt: connection.lastSyncedAt,
+          updatedAt: connection.updatedAt,
+        })),
       generatedAt: Date.now(),
     };
   },
@@ -221,11 +252,7 @@ export const toggleWorkflow = mutation({
         queryBuilder.eq("ownerId", args.ownerId),
       )
       .collect();
-    const connectedProviders = new Set(
-      connections
-        .filter((connection) => connection.status === "connected")
-        .map((connection) => connection.provider),
-    );
+    const connectedProviders = getConnectedProviders(connections);
     const missingProviders = workflow.requirements.filter(
       (provider) => !connectedProviders.has(provider),
     );
@@ -267,6 +294,9 @@ export const recordTestRun = mutation({
   args: {
     ownerId: v.string(),
     workflowId: v.id("workflows"),
+    status: runStatusValidator,
+    message: v.string(),
+    syncedProviders: v.array(providerValidator),
   },
   handler: async (ctx, args) => {
     const workflow = await ctx.db.get(args.workflowId);
@@ -275,33 +305,12 @@ export const recordTestRun = mutation({
       throw new Error("Workflow not found.");
     }
 
-    const connections = await ctx.db
-      .query("connections")
-      .withIndex("by_owner", (queryBuilder) =>
-        queryBuilder.eq("ownerId", args.ownerId),
-      )
-      .collect();
-    const connectedProviders = new Set(
-      connections
-        .filter((connection) => connection.status === "connected")
-        .map((connection) => connection.provider),
-    );
-    const missingProviders = workflow.requirements.filter(
-      (provider) => !connectedProviders.has(provider),
-    );
     const now = Date.now();
-    const runSummary =
-      missingProviders.length > 0
-        ? {
-            status: "needs_auth" as const,
-            message: `Test run blocked until ${missingProviders.join(" and ")} is connected.`,
-            timestamp: now,
-          }
-        : {
-            status: "success" as const,
-            message: "Test run completed with stubbed planner output and deterministic connector steps.",
-            timestamp: now,
-          };
+    const runSummary = {
+      status: args.status,
+      message: args.message,
+      timestamp: now,
+    };
 
     await ctx.db.insert("workflowRuns", {
       ownerId: args.ownerId,
@@ -316,7 +325,57 @@ export const recordTestRun = mutation({
       lastRunSummary: runSummary,
     });
 
+    if (args.syncedProviders.length > 0) {
+      const connections = await ctx.db
+        .query("connections")
+        .withIndex("by_owner", (queryBuilder) =>
+          queryBuilder.eq("ownerId", args.ownerId),
+        )
+        .collect();
+
+      for (const provider of args.syncedProviders) {
+        const connection = connections.find((candidate) => candidate.provider === provider);
+
+        if (!connection) {
+          continue;
+        }
+
+        await ctx.db.patch(connection._id, {
+          status: "connected",
+          lastError: undefined,
+          lastSyncedAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
     return runSummary;
+  },
+});
+
+export const getWorkflowExecutionContext = query({
+  args: {
+    ownerId: v.string(),
+    workflowId: v.id("workflows"),
+  },
+  handler: async (ctx, args) => {
+    const workflow = await ctx.db.get(args.workflowId);
+
+    if (!workflow || workflow.ownerId !== args.ownerId) {
+      throw new Error("Workflow not found.");
+    }
+
+    const connections = await ctx.db
+      .query("connections")
+      .withIndex("by_owner", (queryBuilder) =>
+        queryBuilder.eq("ownerId", args.ownerId),
+      )
+      .collect();
+
+    return {
+      workflow,
+      connections,
+    };
   },
 });
 
@@ -340,14 +399,19 @@ export const upsertConnection = mutation({
       .unique();
 
     if (existingConnection) {
+      const refreshToken = args.refreshToken ?? existingConnection.refreshToken;
+
       await ctx.db.patch(existingConnection._id, {
+        category: "mail",
         status: "connected",
-        email: args.email,
+        email: args.email ?? existingConnection.email,
         scopes: args.scopes,
+        canRefresh: Boolean(refreshToken),
         accessToken: args.accessToken,
-        refreshToken: args.refreshToken,
-        expiresAt: args.expiresAt,
+        refreshToken,
+        expiresAt: args.expiresAt ?? existingConnection.expiresAt,
         connectedAt: existingConnection.connectedAt ?? now,
+        lastError: undefined,
         updatedAt: now,
       });
 
@@ -357,14 +421,45 @@ export const upsertConnection = mutation({
     await ctx.db.insert("connections", {
       ownerId: args.ownerId,
       provider: args.provider,
+      category: "mail",
       status: "connected",
       email: args.email,
       scopes: args.scopes,
+      canRefresh: Boolean(args.refreshToken),
       accessToken: args.accessToken,
       refreshToken: args.refreshToken,
       expiresAt: args.expiresAt,
       connectedAt: now,
       updatedAt: now,
+    });
+
+    return null;
+  },
+});
+
+export const markConnectionNeedsReconnect = mutation({
+  args: {
+    ownerId: v.string(),
+    provider: providerValidator,
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const connection = await ctx.db
+      .query("connections")
+      .withIndex("by_owner_provider", (queryBuilder) =>
+        queryBuilder.eq("ownerId", args.ownerId).eq("provider", args.provider),
+      )
+      .unique();
+
+    if (!connection) {
+      throw new Error("Connection not found.");
+    }
+
+    await ctx.db.patch(connection._id, {
+      status: "needs_reconnect",
+      canRefresh: false,
+      lastError: args.reason,
+      updatedAt: Date.now(),
     });
 
     return null;

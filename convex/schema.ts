@@ -2,6 +2,11 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 const providerValidator = v.union(v.literal("gmail"), v.literal("outlook"));
+const connectionStatusValidator = v.union(
+  v.literal("connected"),
+  v.literal("disconnected"),
+  v.literal("needs_reconnect"),
+);
 const stepStatusValidator = v.union(v.literal("ready"), v.literal("attention"));
 const workflowStatusValidator = v.union(v.literal("draft"), v.literal("active"));
 const runStatusValidator = v.union(
@@ -46,13 +51,17 @@ export default defineSchema({
   connections: defineTable({
     ownerId: v.string(),
     provider: providerValidator,
-    status: v.union(v.literal("connected"), v.literal("disconnected")),
+    category: v.optional(v.literal("mail")),
+    status: connectionStatusValidator,
     email: v.optional(v.string()),
     scopes: v.array(v.string()),
+    canRefresh: v.optional(v.boolean()),
     accessToken: v.optional(v.string()),
     refreshToken: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
     connectedAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    lastSyncedAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_owner", ["ownerId"])

@@ -1,4 +1,12 @@
-export type MailProvider = "gmail" | "outlook";
+import {
+  INTEGRATION_PROVIDERS,
+  PROVIDER_META,
+  type ConnectionState,
+  type IntegrationProvider,
+  type ProviderCategory,
+} from "./provider-catalog";
+
+export type { ConnectionState, IntegrationProvider, ProviderCategory };
 
 export type WorkflowStatus = "draft" | "active";
 
@@ -13,7 +21,7 @@ export type WorkflowTrigger = {
 
 export type WorkflowStep = {
   id: string;
-  provider: MailProvider;
+  provider: IntegrationProvider;
   kind: string;
   title: string;
   detail: string;
@@ -33,7 +41,7 @@ export type WorkflowRecord = {
   description: string;
   prompt: string;
   status: WorkflowStatus;
-  requirements: MailProvider[];
+  requirements: IntegrationProvider[];
   trigger: WorkflowTrigger;
   steps: WorkflowStep[];
   lastRunSummary?: WorkflowRunSummary;
@@ -41,14 +49,17 @@ export type WorkflowRecord = {
   updatedAt: number;
 };
 
-export type ConnectionState = "connected" | "disconnected";
-
 export type AccountConnection = {
-  provider: MailProvider;
+  provider: IntegrationProvider;
+  category: ProviderCategory;
   status: ConnectionState;
   email?: string;
   scopes: string[];
+  canRefresh: boolean;
+  expiresAt?: number;
   connectedAt?: number;
+  lastError?: string;
+  lastSyncedAt?: number;
   updatedAt: number;
 };
 
@@ -63,33 +74,10 @@ export type WorkflowDraftInput = Omit<
   "_id" | "createdAt" | "updatedAt"
 >;
 
-export const PROVIDER_META: Record<
-  MailProvider,
-  {
-    label: string;
-    description: string;
-    iconUrl: string;
-    accentClassName: string;
-    buttonLabel: string;
-  }
+const STEP_LIBRARY: Record<
+  IntegrationProvider,
+  Array<{ kind: string; title: string; detail: string }>
 > = {
-  gmail: {
-    label: "Gmail",
-    description: "Google Workspace mailboxes and cleanup rules.",
-    iconUrl: "/gmail.svg",
-    accentClassName: "from-rose-400 via-amber-300 to-lime-300",
-    buttonLabel: "+ Connect",
-  },
-  outlook: {
-    label: "Outlook Email",
-    description: "Microsoft 365 inboxes, folders, and digest actions.",
-    iconUrl: "/outlook.svg",
-    accentClassName: "from-sky-600 via-cyan-400 to-blue-300",
-    buttonLabel: "+ Connect",
-  },
-};
-
-const STEP_LIBRARY: Record<MailProvider, Array<{ kind: string; title: string; detail: string }>> = {
   gmail: [
     {
       kind: "ingest",
@@ -138,7 +126,9 @@ function normalizePrompt(prompt: string) {
   return prompt.trim().replace(/\s+/g, " ");
 }
 
-export function deriveProvidersFromPrompt(prompt: string): MailProvider[] {
+export function deriveProvidersFromPrompt(
+  prompt: string,
+): IntegrationProvider[] {
   const normalized = normalizePrompt(prompt);
   const wantsGmail = /gmail|google/i.test(normalized);
   const wantsOutlook = /outlook|microsoft|office 365/i.test(normalized);
@@ -155,7 +145,7 @@ export function deriveProvidersFromPrompt(prompt: string): MailProvider[] {
     return ["gmail"];
   }
 
-  return ["outlook", "gmail"];
+  return [...INTEGRATION_PROVIDERS];
 }
 
 export function buildStubWorkflow(prompt: string): WorkflowDraftInput {
@@ -213,4 +203,8 @@ export function formatTimestamp(timestamp?: number) {
     hour: "numeric",
     minute: "2-digit",
   }).format(timestamp);
+}
+
+export function getConnectionReadiness(connection: AccountConnection) {
+  return connection.status === "connected";
 }

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  isIntegrationProvider,
+  type IntegrationProvider,
+} from "@/lib/provider-catalog";
 import { UnauthorizedError, getRequestOwnerId } from "@/lib/server/auth";
 import { handleRouteError } from "@/lib/server/http";
 import {
@@ -8,10 +12,9 @@ import {
   getOAuthCookieName,
   hasOAuthCredentials,
 } from "@/lib/server/oauth";
-import type { MailProvider } from "@/lib/workflow-model";
 
-function assertProvider(provider: string): MailProvider {
-  if (provider === "gmail" || provider === "outlook") {
+function assertProvider(provider: string): IntegrationProvider {
+  if (isIntegrationProvider(provider)) {
     return provider;
   }
 

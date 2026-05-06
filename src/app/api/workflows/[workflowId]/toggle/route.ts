@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
+import type { IntegrationProvider } from "@/lib/provider-catalog";
 import { getRequestOwnerId } from "@/lib/server/auth";
 import { convexMutation } from "@/lib/server/convex-client";
 import { handleRouteError } from "@/lib/server/http";
-import type { MailProvider } from "@/lib/workflow-model";
 
 type ToggleWorkflowResponse =
   | {
@@ -15,7 +15,7 @@ type ToggleWorkflowResponse =
       ok: false;
       error: "authorization_required";
       workflowId: string;
-      missingProviders: MailProvider[];
+      missingProviders: IntegrationProvider[];
     };
 
 export async function POST(

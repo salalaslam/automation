@@ -35,12 +35,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   DashboardData,
-  MailProvider,
-  PROVIDER_META,
   WorkflowRecord,
   WorkflowRunSummary,
   formatTimestamp,
+  getConnectionReadiness,
 } from "@/lib/workflow-model";
+import {
+  PROVIDER_META,
+  type IntegrationProvider,
+} from "@/lib/provider-catalog";
 import { cn } from "@/lib/utils";
 
 const TRIGGER_ID = "__trigger__";
@@ -59,7 +62,7 @@ type ToggleWorkflowResponse =
       ok: false;
       error: "authorization_required";
       workflowId: string;
-      missingProviders: MailProvider[];
+      missingProviders: IntegrationProvider[];
     };
 
 type TestRunResponse = {
@@ -104,7 +107,7 @@ async function requestJson<T>(input: string, init?: RequestInit) {
   return payload as T;
 }
 
-function ProviderIcon({ provider }: { provider: MailProvider }) {
+function ProviderIcon({ provider }: { provider: IntegrationProvider }) {
   const meta = PROVIDER_META[provider];
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -116,6 +119,34 @@ function ProviderIcon({ provider }: { provider: MailProvider }) {
       className="shrink-0 object-contain"
       loading="eager"
     />
+  );
+}
+
+function ConnectionBadge({
+  status,
+}: {
+  status: "connected" | "disconnected" | "needs_reconnect";
+}) {
+  if (status === "connected") {
+    return (
+      <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
+        Connected
+      </span>
+    );
+  }
+
+  if (status === "needs_reconnect") {
+    return (
+      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+        Reconnect
+      </span>
+    );
+  }
+
+  return (
+    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      Not connected
+    </span>
   );
 }
 
@@ -159,7 +190,7 @@ function AuthorizationDialog({
   onOpenChange,
 }: {
   open: boolean;
-  providers: MailProvider[];
+  providers: IntegrationProvider[];
   onOpenChange: (open: boolean) => void;
 }) {
   return (
@@ -212,7 +243,9 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   );
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [authorizationProviders, setAuthorizationProviders] = useState<MailProvider[]>([]);
+  const [authorizationProviders, setAuthorizationProviders] = useState<
+    IntegrationProvider[]
+  >([]);
   const [authorizationOpen, setAuthorizationOpen] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -309,7 +342,7 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   }, [oauthState, queryClient]);
 
   const connectedProviders = new Set(
-    connections.filter((c) => c.status === "connected").map((c) => c.provider),
+    connections.filter(getConnectionReadiness).map((c) => c.provider),
   );
 
   const missingProvidersForSelected =
@@ -700,10 +733,8 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                               )}
                             </div>
                           </div>
-                          {connection.status === "connected" ? (
-                            <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
-                              Connected
-                            </span>
+                          {getConnectionReadiness(connection) ? (
+                            <ConnectionBadge status={connection.status} />
                           ) : (
                             <Button
                               variant="outline"
@@ -715,10 +746,36 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                                 )
                               }
                             >
-                              {PROVIDER_META[connection.provider].buttonLabel}
+                              {connection.status === "needs_reconnect"
+                                ? "Reconnect"
+                                : PROVIDER_META[connection.provider].buttonLabel}
                             </Button>
                           )}
                         </div>
+                        {(connection.connectedAt ||
+                          connection.lastSyncedAt ||
+                          connection.lastError ||
+                          connection.expiresAt) && (
+                          <div className="mt-2 space-y-1 text-[10px] text-muted-foreground">
+                            {connection.connectedAt && (
+                              <p>Connected: {formatTimestamp(connection.connectedAt)}</p>
+                            )}
+                            {connection.lastSyncedAt && (
+                              <p>Last live check: {formatTimestamp(connection.lastSyncedAt)}</p>
+                            )}
+                            {connection.expiresAt && (
+                              <p>Access expires: {formatTimestamp(connection.expiresAt)}</p>
+                            )}
+                            <p>
+                              {connection.canRefresh
+                                ? "Refresh token available for automatic renewal."
+                                : "No refresh token is stored for automatic renewal."}
+                            </p>
+                            {connection.lastError && (
+                              <p className="text-amber-700">{connection.lastError}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
 
@@ -752,4 +809,3 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
     </>
   );
 }
-
