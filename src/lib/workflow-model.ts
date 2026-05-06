@@ -68,7 +68,7 @@ export const PROVIDER_META: Record<
   {
     label: string;
     description: string;
-    iconLetter: string;
+    iconUrl: string;
     accentClassName: string;
     buttonLabel: string;
   }
@@ -76,14 +76,14 @@ export const PROVIDER_META: Record<
   gmail: {
     label: "Gmail",
     description: "Google Workspace mailboxes and cleanup rules.",
-    iconLetter: "G",
+    iconUrl: "https://svgl.app/library/gmail.svg",
     accentClassName: "from-rose-400 via-amber-300 to-lime-300",
     buttonLabel: "+ Connect",
   },
   outlook: {
     label: "Outlook Email",
     description: "Microsoft 365 inboxes, folders, and digest actions.",
-    iconLetter: "O",
+    iconUrl: "https://svgl.app/library/microsoft-outlook.svg",
     accentClassName: "from-sky-600 via-cyan-400 to-blue-300",
     buttonLabel: "+ Connect",
   },

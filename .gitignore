@@ -45,3 +45,4 @@ extracted_frames/
 next-env.d.ts
 /.agents/skills
 skills-lock.json
+.env*.local

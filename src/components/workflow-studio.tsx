@@ -111,14 +111,16 @@ async function requestJson<T>(input: string, init?: RequestInit) {
 }
 
 function ProviderGlyph({ provider }: { provider: MailProvider }) {
+  const meta = PROVIDER_META[provider];
   return (
-    <div
-      className={cn(
-        "flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br text-base font-semibold text-white shadow-sm",
-        PROVIDER_META[provider].accentClassName,
-      )}
-    >
-      {PROVIDER_META[provider].iconLetter}
+    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-black/8">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={meta.iconUrl}
+        alt={meta.label}
+        className="h-full w-full object-contain"
+        loading="eager"
+      />
     </div>
   );
 }
