@@ -7,6 +7,8 @@ import { AppProviders } from "@/components/providers/app-providers";
 import { isClerkEnabled } from "@/lib/server/auth";
 import "./globals.css";
 
+export const dynamic = "force-dynamic";
+
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
@@ -26,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.className} h-full antialiased`}>
       <body className="h-full">
-        {clerkEnabled ? <ClerkProvider>{content}</ClerkProvider> : content}
+        {clerkEnabled ? <ClerkProvider dynamic>{content}</ClerkProvider> : content}
       </body>
     </html>
   );
