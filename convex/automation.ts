@@ -1,7 +1,18 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
-const providerValidator = v.union(v.literal("gmail"), v.literal("outlook"));
+const integrationProviderValidator = v.union(
+  v.literal("gmail"),
+  v.literal("outlook"),
+);
+const stepProviderValidator = v.union(
+  integrationProviderValidator,
+  v.literal("google-drive"),
+  v.literal("google-docs"),
+  v.literal("slack"),
+  v.literal("salesforce"),
+  v.literal("google-calendar"),
+);
 const workflowStatusValidator = v.union(v.literal("draft"), v.literal("active"));
 const stepStatusValidator = v.union(v.literal("ready"), v.literal("attention"));
 const runStatusValidator = v.union(
@@ -16,7 +27,7 @@ const workflowDraftValidator = v.object({
   description: v.string(),
   prompt: v.string(),
   status: workflowStatusValidator,
-  requirements: v.array(providerValidator),
+  requirements: v.array(integrationProviderValidator),
   trigger: v.object({
     label: v.string(),
     cadence: v.string(),
@@ -24,7 +35,7 @@ const workflowDraftValidator = v.object({
   steps: v.array(
     v.object({
       id: v.string(),
-      provider: providerValidator,
+      provider: stepProviderValidator,
       kind: v.string(),
       title: v.string(),
       detail: v.string(),
@@ -272,6 +283,90 @@ export const createWorkflowFromPrompt = mutation({
   },
 });
 
+export const appendWorkflowStep = mutation({
+  args: {
+    ownerId: v.string(),
+    workflowId: v.id("workflows"),
+    step: v.object({
+      id: v.string(),
+      provider: stepProviderValidator,
+      kind: v.string(),
+      title: v.string(),
+      detail: v.string(),
+      status: stepStatusValidator,
+      configSummary: v.array(v.string()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const workflow = await ctx.db.get(args.workflowId);
+
+    if (!workflow || workflow.ownerId !== args.ownerId) {
+      throw new Error("Workflow not found.");
+    }
+
+    const now = Date.now();
+
+    await ctx.db.patch(args.workflowId, {
+      steps: [...workflow.steps, args.step],
+      updatedAt: now,
+      lastRunSummary: {
+        status: "pending",
+        message: `Added step: ${args.step.title}.`,
+        timestamp: now,
+      },
+    });
+
+    return ctx.db.get(args.workflowId);
+  },
+});
+
+export const reorderWorkflowSteps = mutation({
+  args: {
+    ownerId: v.string(),
+    workflowId: v.id("workflows"),
+    orderedStepIds: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const workflow = await ctx.db.get(args.workflowId);
+
+    if (!workflow || workflow.ownerId !== args.ownerId) {
+      throw new Error("Workflow not found.");
+    }
+
+    if (workflow.steps.length !== args.orderedStepIds.length) {
+      throw new Error("Step order is invalid.");
+    }
+
+    const stepsById = new Map(workflow.steps.map((step) => [step.id, step]));
+    const reorderedSteps = args.orderedStepIds.map((stepId) => {
+      const step = stepsById.get(stepId);
+
+      if (!step) {
+        throw new Error("Step order is invalid.");
+      }
+
+      return step;
+    });
+
+    if (stepsById.size !== reorderedSteps.length) {
+      throw new Error("Step order is invalid.");
+    }
+
+    const now = Date.now();
+
+    await ctx.db.patch(args.workflowId, {
+      steps: reorderedSteps,
+      updatedAt: now,
+    });
+
+    return {
+      workflowId: workflow._id,
+      steps: reorderedSteps,
+      updatedAt: now,
+    };
+  },
+});
+
 export const toggleWorkflow = mutation({
   args: {
     ownerId: v.string(),
@@ -350,7 +445,7 @@ export const recordTestRun = mutation({
     workflowId: v.id("workflows"),
     status: runStatusValidator,
     message: v.string(),
-    syncedProviders: v.array(providerValidator),
+    syncedProviders: v.array(integrationProviderValidator),
   },
   handler: async (ctx, args) => {
     const workflow = await ctx.db.get(args.workflowId);
@@ -436,7 +531,7 @@ export const getWorkflowExecutionContext = query({
 export const upsertConnection = mutation({
   args: {
     ownerId: v.string(),
-    provider: providerValidator,
+    provider: integrationProviderValidator,
     email: v.optional(v.string()),
     scopes: v.array(v.string()),
     accessToken: v.string(),
@@ -494,7 +589,7 @@ export const upsertConnection = mutation({
 export const markConnectionNeedsReconnect = mutation({
   args: {
     ownerId: v.string(),
-    provider: providerValidator,
+    provider: integrationProviderValidator,
     reason: v.string(),
   },
   handler: async (ctx, args) => {

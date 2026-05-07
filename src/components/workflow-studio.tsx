@@ -2,12 +2,19 @@
 
 import Link from "next/link";
 import {
+  CalendarDays,
   CalendarClock,
   CheckCircle2,
   ChevronLeft,
   CircleAlert,
+  Database,
+  FileText,
+  FolderOpen,
+  GripVertical,
   Loader2,
+  Mail,
   MoreHorizontal,
+  MessageSquare,
   Play,
   Plus,
   Power,
@@ -21,13 +28,26 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { PROVIDER_META, type IntegrationProvider } from "@/lib/provider-catalog";
 import {
+  type DashboardData,
+  STEP_OPTION_GROUPS,
+  STEP_PROVIDER_META,
   type WorkflowRecord,
   type WorkflowRunSummary,
+  type StepProvider,
+  type WorkflowStep,
   formatTimestamp,
   getConnectionReadiness,
+  isIntegrationStepProvider,
 } from "@/lib/workflow-model";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +67,14 @@ import {
 const TRIGGER_ID = "__trigger__";
 const defaultPrompt =
   "Clean Gmail and Outlook inboxes every morning and send me a short recap.";
+
+const previewStepIcons = {
+  "google-drive": FolderOpen,
+  "google-docs": FileText,
+  slack: MessageSquare,
+  salesforce: Database,
+  "google-calendar": CalendarDays,
+} as const satisfies Record<Exclude<StepProvider, IntegrationProvider>, typeof FolderOpen>;
 
 type WorkflowStudioProps = {
   authEnabled: boolean;
@@ -76,6 +104,79 @@ type GeneratedWorkflowResponse = {
   workflow: WorkflowRecord;
 };
 
+type ReorderWorkflowStepsResponse = {
+  workflowId: string;
+  steps: WorkflowStep[];
+  updatedAt: number;
+};
+
+type DropPlacement = "before" | "after";
+
+function WorkflowStepIcon({ provider }: { provider: StepProvider }) {
+  if (isIntegrationStepProvider(provider)) {
+    return <ProviderIcon provider={provider} />;
+  }
+
+  const Icon = previewStepIcons[provider];
+
+  return (
+    <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+      <Icon className="size-3" />
+    </span>
+  );
+}
+
+function reorderSteps(
+  steps: WorkflowStep[],
+  draggedStepId: string,
+  targetStepId: string,
+  placement: DropPlacement,
+) {
+  if (draggedStepId === targetStepId) {
+    return steps;
+  }
+
+  const draggedIndex = steps.findIndex((step) => step.id === draggedStepId);
+  const targetIndex = steps.findIndex((step) => step.id === targetStepId);
+
+  if (draggedIndex < 0 || targetIndex < 0) {
+    return steps;
+  }
+
+  const nextSteps = [...steps];
+  const [draggedStep] = nextSteps.splice(draggedIndex, 1);
+  const adjustedTargetIndex = nextSteps.findIndex((step) => step.id === targetStepId);
+  const insertIndex = placement === "before" ? adjustedTargetIndex : adjustedTargetIndex + 1;
+
+  nextSteps.splice(insertIndex, 0, draggedStep);
+
+  return nextSteps;
+}
+
+function updateDashboardWorkflowSteps(
+  dashboard: DashboardData | undefined,
+  workflowId: string,
+  steps: WorkflowStep[],
+  updatedAt: number,
+) {
+  if (!dashboard) {
+    return dashboard;
+  }
+
+  return {
+    ...dashboard,
+    workflows: dashboard.workflows.map((workflow) =>
+      workflow._id === workflowId
+        ? {
+            ...workflow,
+            steps,
+            updatedAt,
+          }
+        : workflow,
+    ),
+  };
+}
+
 export function WorkflowStudio({
   authEnabled,
   workflowId,
@@ -93,7 +194,13 @@ export function WorkflowStudio({
     IntegrationProvider[]
   >([]);
   const [authorizationOpen, setAuthorizationOpen] = useState(false);
+  const [addStepOpen, setAddStepOpen] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
+  const [draggedStepId, setDraggedStepId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    stepId: string;
+    placement: DropPlacement;
+  } | null>(null);
 
   const cleanSearch = useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -154,6 +261,105 @@ export function WorkflowStudio({
     },
     onError: (error) => {
       setBanner(getMutationErrorMessage(error));
+    },
+  });
+
+  const addStepMutation = useMutation({
+    mutationFn: ({
+      targetWorkflowId,
+      optionId,
+    }: {
+      targetWorkflowId: string;
+      optionId: string;
+    }) =>
+      requestJson<GeneratedWorkflowResponse>(
+        `/api/workflows/${targetWorkflowId}/steps`,
+        {
+          method: "POST",
+          body: JSON.stringify({ optionId }),
+        },
+      ),
+    onSuccess: ({ workflow }) => {
+      const appendedStep = workflow.steps.at(-1) ?? null;
+      setAddStepOpen(false);
+      setSelectedStepId(appendedStep?.id ?? null);
+      setBanner(
+        appendedStep ? `Added step: ${appendedStep.title}.` : "Step added.",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (error) => {
+      setBanner(getMutationErrorMessage(error));
+    },
+  });
+
+  const reorderWorkflowStepsMutation = useMutation({
+    mutationFn: ({
+      targetWorkflowId,
+      orderedStepIds,
+    }: {
+      targetWorkflowId: string;
+      orderedStepIds: string[];
+    }) =>
+      requestJson<ReorderWorkflowStepsResponse>(
+        `/api/workflows/${targetWorkflowId}/steps/reorder`,
+        {
+          method: "POST",
+          body: JSON.stringify({ orderedStepIds }),
+        },
+      ),
+    onMutate: async ({ targetWorkflowId, orderedStepIds }) => {
+      await queryClient.cancelQueries({ queryKey: ["dashboard"] });
+
+      const previousDashboard = queryClient.getQueryData<DashboardData>(["dashboard"]);
+      const targetWorkflow = previousDashboard?.workflows.find(
+        (workflow) => workflow._id === targetWorkflowId,
+      );
+
+      if (targetWorkflow) {
+        const optimisticSteps = orderedStepIds
+          .map((stepId) => targetWorkflow.steps.find((step) => step.id === stepId))
+          .filter((step): step is WorkflowStep => Boolean(step));
+
+        if (optimisticSteps.length === targetWorkflow.steps.length) {
+          queryClient.setQueryData<DashboardData>(
+            ["dashboard"],
+            updateDashboardWorkflowSteps(
+              previousDashboard,
+              targetWorkflowId,
+              optimisticSteps,
+              Date.now(),
+            ),
+          );
+        }
+      }
+
+      return { previousDashboard };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousDashboard) {
+        queryClient.setQueryData(["dashboard"], context.previousDashboard);
+      }
+
+      setBanner(getMutationErrorMessage(error));
+    },
+    onSuccess: ({ workflowId: reorderedWorkflowId, steps, updatedAt }) => {
+      queryClient.setQueryData<DashboardData>(
+        ["dashboard"],
+        (currentDashboard) =>
+          updateDashboardWorkflowSteps(
+            currentDashboard,
+            reorderedWorkflowId,
+            steps,
+            updatedAt,
+          ),
+      );
+      setBanner("Step order saved.");
+    },
+    onSettled: () => {
+      setDraggedStepId(null);
+      setDropTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 
@@ -223,6 +429,43 @@ export function WorkflowStudio({
   const missingProvidersForSelected =
     selectedWorkflow?.requirements.filter((provider) => !connectedProviders.has(provider)) ?? [];
 
+  const selectedStepSupportsConnection = selectedStep
+    ? isIntegrationStepProvider(selectedStep.provider)
+    : false;
+
+  const selectedStepConnections =
+    selectedStep && selectedStepSupportsConnection
+      ? connections.filter((connection) => connection.provider === selectedStep.provider)
+      : [];
+
+  const handleStepDrop = (targetStepId: string, placement: DropPlacement) => {
+    if (!selectedWorkflow || !draggedStepId) {
+      setDropTarget(null);
+      return;
+    }
+
+    const reorderedSteps = reorderSteps(
+      selectedWorkflow.steps,
+      draggedStepId,
+      targetStepId,
+      placement,
+    );
+    const orderedStepIds = reorderedSteps.map((step) => step.id);
+
+    if (
+      orderedStepIds.every((stepId, index) => stepId === selectedWorkflow.steps[index]?.id)
+    ) {
+      setDraggedStepId(null);
+      setDropTarget(null);
+      return;
+    }
+
+    reorderWorkflowStepsMutation.mutate({
+      targetWorkflowId: selectedWorkflow._id,
+      orderedStepIds,
+    });
+  };
+
   if (dashboardQuery.isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
@@ -283,6 +526,91 @@ export function WorkflowStudio({
         onOpenChange={setAuthorizationOpen}
         returnTo={returnTo}
       />
+
+      <Sheet open={addStepOpen} onOpenChange={setAddStepOpen}>
+        <SheetContent className="w-full gap-0 p-0 sm:max-w-md">
+          <SheetHeader className="border-b px-4 py-4">
+            <SheetTitle>Add step</SheetTitle>
+            <SheetDescription className="text-xs">
+              Insert another action into this workflow. Gmail and Outlook steps run with the current connectors; broader app steps can be staged now as previews.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+            {STEP_OPTION_GROUPS.map((group) => (
+              <section key={group.id} className="space-y-2.5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    {group.title}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {group.description}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  {group.options.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      disabled={!selectedWorkflow || addStepMutation.isPending}
+                      onClick={() => {
+                        if (!selectedWorkflow) {
+                          return;
+                        }
+
+                        addStepMutation.mutate({
+                          targetWorkflowId: selectedWorkflow._id,
+                          optionId: option.id,
+                        });
+                      }}
+                      className="w-full rounded-2xl border border-border bg-white px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <div className="flex items-start gap-3">
+                        <WorkflowStepIcon provider={option.provider} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-medium text-foreground">{option.title}</span>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                              {STEP_PROVIDER_META[option.provider].label}
+                            </span>
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                                option.availability === "live"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-amber-100 text-amber-700",
+                              )}
+                            >
+                              {option.availability === "live" ? "Live" : "Preview"}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            {option.detail}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {option.configSummary.slice(0, 2).map((item) => (
+                              <span
+                                key={item}
+                                className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600"
+                              >
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        {addStepMutation.isPending ? (
+                          <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                        ) : (
+                          <Plus className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <div className="flex min-h-screen flex-col bg-white text-xs md:flex-row">
         <aside className="flex w-full flex-col border-b bg-white md:min-h-screen md:w-[42%] md:border-b-0 md:border-r lg:w-[40%] xl:w-[38%]">
@@ -419,57 +747,116 @@ export function WorkflowStudio({
                   </div>
                 </div>
 
-                {selectedWorkflow.steps.length > 0 && (
-                  <div className="mt-3">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <div className="mt-3">
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Actions
                     </p>
-                    {selectedWorkflow.steps.map((step, index) => (
-                      <div key={step.id} className="flex flex-col">
-                        <div className="mx-auto h-3 w-px bg-border" />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSelectedStepId(selectedStepId === step.id ? null : step.id)
-                          }
-                          className={cn(
-                            "flex items-center gap-2 rounded border px-2.5 py-1.5 text-left text-[11px] transition-colors",
-                            selectedStepId === step.id
-                              ? "border-blue-300 bg-blue-50"
-                              : "border-border bg-white hover:bg-gray-50",
-                          )}
-                        >
-                          {index + 2 === 4 ? (
-                            <Sparkles className="size-3.5 shrink-0 text-violet-600" />
-                          ) : (
-                            <ProviderIcon provider={step.provider} />
-                          )}
-                          <span className="font-medium">Step {index + 2}: {step.title}</span>
-                          <span
-                            className={cn(
-                              "ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-                              step.status === "ready"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-amber-100 text-amber-700",
-                            )}
-                          >
-                            {step.status}
-                          </span>
-                          <MoreHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
-                        </button>
-                      </div>
-                    ))}
-                    <div className="flex flex-col items-center">
-                      <div className="h-3 w-px bg-border" />
+                    <span className="text-[10px] text-muted-foreground">
+                      Drag steps to reorder
+                    </span>
+                  </div>
+                  {selectedWorkflow.steps.map((step, index) => (
+                    <div key={step.id} className="flex flex-col">
+                      <div
+                        className={cn(
+                          "mx-auto h-1.5 w-full max-w-[20rem] rounded-full transition-colors",
+                          dropTarget?.stepId === step.id && dropTarget.placement === "before"
+                            ? "bg-blue-200"
+                            : "bg-transparent",
+                        )}
+                      />
+                      <div className="mx-auto h-3 w-px bg-border" />
                       <button
                         type="button"
-                        className="rounded border border-dashed px-3 py-1 text-[11px] text-muted-foreground hover:border-gray-400 hover:text-foreground"
+                        draggable={!reorderWorkflowStepsMutation.isPending}
+                        onClick={() =>
+                          setSelectedStepId(selectedStepId === step.id ? null : step.id)
+                        }
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", step.id);
+                          setDraggedStepId(step.id);
+                          setDropTarget(null);
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+
+                          if (draggedStepId === step.id) {
+                            setDropTarget(null);
+                            return;
+                          }
+
+                          const bounds = event.currentTarget.getBoundingClientRect();
+                          const placement =
+                            event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+
+                          setDropTarget({ stepId: step.id, placement });
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+
+                          const bounds = event.currentTarget.getBoundingClientRect();
+                          const placement =
+                            event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+
+                          if (draggedStepId === step.id) {
+                            setDraggedStepId(null);
+                            setDropTarget(null);
+                            return;
+                          }
+
+                          handleStepDrop(step.id, placement);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedStepId(null);
+                          setDropTarget(null);
+                        }}
+                        className={cn(
+                          "flex items-center gap-2 rounded border px-2.5 py-1.5 text-left text-[11px] transition-colors",
+                          selectedStepId === step.id
+                            ? "border-blue-300 bg-blue-50"
+                            : "border-border bg-white hover:bg-gray-50",
+                          draggedStepId === step.id && "cursor-grabbing opacity-60",
+                          !reorderWorkflowStepsMutation.isPending && "cursor-grab",
+                        )}
                       >
-                        + Add step
+                        <WorkflowStepIcon provider={step.provider} />
+                        <GripVertical className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="font-medium">Step {index + 2}: {step.title}</span>
+                        <span
+                          className={cn(
+                            "ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
+                            step.status === "ready"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-amber-100 text-amber-700",
+                          )}
+                        >
+                          {step.status}
+                        </span>
+                        <MoreHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
                       </button>
+                      <div
+                        className={cn(
+                          "mx-auto h-1.5 w-full max-w-[20rem] rounded-full transition-colors",
+                          dropTarget?.stepId === step.id && dropTarget.placement === "after"
+                            ? "bg-blue-200"
+                            : "bg-transparent",
+                        )}
+                      />
                     </div>
+                  ))}
+                  <div className="flex flex-col items-center">
+                    <div className="h-3 w-px bg-border" />
+                    <button
+                      type="button"
+                      onClick={() => setAddStepOpen(true)}
+                      className="rounded border border-dashed px-3 py-1 text-[11px] text-muted-foreground transition hover:border-gray-400 hover:text-foreground"
+                    >
+                      + Add step
+                    </button>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           ) : (
@@ -579,7 +966,7 @@ export function WorkflowStudio({
                 <div className="flex-1 space-y-3 overflow-y-auto p-3">
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <ProviderIcon provider={selectedStep.provider} />
+                      <WorkflowStepIcon provider={selectedStep.provider} />
                       <h2 className="font-semibold">{selectedStep.title}</h2>
                     </div>
                     <p className="mt-1 text-[11px] text-muted-foreground">{selectedStep.detail}</p>
@@ -596,9 +983,19 @@ export function WorkflowStudio({
                     </div>
                   )}
 
-                  {connections
-                    .filter((connection) => connection.provider === selectedStep.provider)
-                    .map((connection) => (
+                  {!selectedStepSupportsConnection && (
+                    <div className="rounded border border-dashed bg-slate-50 px-2.5 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="size-3 shrink-0 text-slate-600" />
+                        <span className="text-[11px] font-medium">Preview connector</span>
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        {STEP_PROVIDER_META[selectedStep.provider].label} steps can be added to the workflow now, but runtime execution and connection controls are still being wired for this connector.
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedStepConnections.map((connection) => (
                       <div key={connection.provider} className="rounded border px-2.5 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5">

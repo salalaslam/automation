@@ -8,6 +8,379 @@ import {
 
 export type { ConnectionState, IntegrationProvider, ProviderCategory };
 
+export const STEP_PROVIDERS = [
+  ...INTEGRATION_PROVIDERS,
+  "google-drive",
+  "google-docs",
+  "slack",
+  "salesforce",
+  "google-calendar",
+] as const;
+
+export type StepProvider = (typeof STEP_PROVIDERS)[number];
+
+export type StepAvailability = "live" | "preview";
+
+export type StepCatalogOption = {
+  id: string;
+  provider: StepProvider;
+  kind: string;
+  title: string;
+  detail: string;
+  configSummary: string[];
+  availability: StepAvailability;
+};
+
+export type StepCatalogGroup = {
+  id: string;
+  title: string;
+  description: string;
+  options: StepCatalogOption[];
+};
+
+export const STEP_PROVIDER_META: Record<
+  StepProvider,
+  { label: string; availability: StepAvailability }
+> = {
+  gmail: {
+    label: "Gmail",
+    availability: "live",
+  },
+  outlook: {
+    label: "Outlook Email",
+    availability: "live",
+  },
+  "google-drive": {
+    label: "Google Drive",
+    availability: "preview",
+  },
+  "google-docs": {
+    label: "Google Docs",
+    availability: "preview",
+  },
+  slack: {
+    label: "Slack",
+    availability: "preview",
+  },
+  salesforce: {
+    label: "Salesforce",
+    availability: "preview",
+  },
+  "google-calendar": {
+    label: "Google Calendar",
+    availability: "preview",
+  },
+};
+
+export const STEP_OPTION_GROUPS: StepCatalogGroup[] = [
+  {
+    id: "mail",
+    title: "Mail",
+    description: "Live mailbox actions that work with the current Gmail and Outlook connections.",
+    options: [
+      {
+        id: "gmail-scan-inbox",
+        provider: "gmail",
+        kind: "ingest",
+        title: "Scan Gmail inbox",
+        detail: "Collect unread, promotional, and low-priority threads from Gmail.",
+        configSummary: [
+          "Reads inbox threads with sender, subject, and preview metadata",
+          "Compatible with deterministic cleanup and digest actions",
+        ],
+        availability: "live",
+      },
+      {
+        id: "gmail-cleanup-rules",
+        provider: "gmail",
+        kind: "cleanup",
+        title: "Apply Gmail cleanup rules",
+        detail: "Archive newsletters, mark spam, and move receipts into labels.",
+        configSummary: [
+          "Uses deterministic Gmail actions only",
+          "Dry run remains available before mailbox changes",
+        ],
+        availability: "live",
+      },
+      {
+        id: "gmail-send-digest",
+        provider: "gmail",
+        kind: "digest",
+        title: "Send Gmail digest",
+        detail: "Summarize what changed and flag anything that needs manual review.",
+        configSummary: [
+          "Outputs a concise recap payload",
+          "Highlights urgent or repeated senders first",
+        ],
+        availability: "live",
+      },
+      {
+        id: "outlook-review-inbox",
+        provider: "outlook",
+        kind: "ingest",
+        title: "Review Outlook inbox",
+        detail: "Collect focused and other inbox threads from Microsoft 365.",
+        configSummary: [
+          "Pulls Outlook threads with structured mailbox metadata",
+          "Pairs with Outlook cleanup and recap actions",
+        ],
+        availability: "live",
+      },
+      {
+        id: "outlook-sort-conversations",
+        provider: "outlook",
+        kind: "cleanup",
+        title: "Sort Outlook conversations",
+        detail: "Move updates into folders, archive stale threads, and tag follow-ups.",
+        configSummary: [
+          "Targets Microsoft 365 folders and follow-up flows",
+          "Keeps the workflow deterministic and auditable",
+        ],
+        availability: "live",
+      },
+      {
+        id: "outlook-compose-recap",
+        provider: "outlook",
+        kind: "digest",
+        title: "Compose Outlook recap",
+        detail: "Create a short summary of everything triaged inside Outlook.",
+        configSummary: [
+          "Produces a concise Outlook recap message",
+          "Designed for end-of-run reporting",
+        ],
+        availability: "live",
+      },
+    ],
+  },
+  {
+    id: "drive",
+    title: "Drive",
+    description: "File handling steps you can stage now while connector runtime support is being wired.",
+    options: [
+      {
+        id: "drive-read-file",
+        provider: "google-drive",
+        kind: "read",
+        title: "Read file",
+        detail: "Open a specific Drive file and extract structured content for later steps.",
+        configSummary: [
+          "Targets a known Google Drive file",
+          "Passes extracted content to downstream actions",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "drive-search-files",
+        provider: "google-drive",
+        kind: "search",
+        title: "Search files",
+        detail: "Find Drive files by name, owner, or metadata before processing them.",
+        configSummary: [
+          "Searches Drive by query and metadata filters",
+          "Designed for document lookup flows",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "drive-upload-file",
+        provider: "google-drive",
+        kind: "write",
+        title: "Upload file",
+        detail: "Create a new Drive file from generated content or attachments.",
+        configSummary: [
+          "Stages file creation in the target Drive workspace",
+          "Useful for reports, exports, and archives",
+        ],
+        availability: "preview",
+      },
+    ],
+  },
+  {
+    id: "docs",
+    title: "Docs",
+    description: "Document operations for drafting, reading, and appending generated content.",
+    options: [
+      {
+        id: "docs-search-documents",
+        provider: "google-docs",
+        kind: "search",
+        title: "Search documents",
+        detail: "Find matching Google Docs before reading or updating them.",
+        configSummary: [
+          "Searches docs by title and metadata",
+          "Pairs well with document read and append flows",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "docs-read-document",
+        provider: "google-docs",
+        kind: "read",
+        title: "Read document",
+        detail: "Load an existing document and extract the latest body content.",
+        configSummary: [
+          "Designed for reference and summarization tasks",
+          "Preserves the source document as read-only input",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "docs-create-document",
+        provider: "google-docs",
+        kind: "write",
+        title: "Create document",
+        detail: "Generate a new Google Doc to hold notes, recaps, or workflow output.",
+        configSummary: [
+          "Creates a new document from workflow output",
+          "Ideal for reports and generated briefs",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "docs-append-document",
+        provider: "google-docs",
+        kind: "write",
+        title: "Append to document",
+        detail: "Add new generated content to the end of an existing Google Doc.",
+        configSummary: [
+          "Appends structured output without overwriting prior content",
+          "Useful for daily logs and rolling reports",
+        ],
+        availability: "preview",
+      },
+    ],
+  },
+  {
+    id: "slack",
+    title: "Slack",
+    description: "Messaging and workspace discovery steps for downstream notifications and triage.",
+    options: [
+      {
+        id: "slack-send-message",
+        provider: "slack",
+        kind: "notify",
+        title: "Send message",
+        detail: "Post a message into a Slack channel or DM when the workflow finishes.",
+        configSummary: [
+          "Targets a selected channel or direct conversation",
+          "Fits approval, alerting, and recap use cases",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "slack-search-messages",
+        provider: "slack",
+        kind: "search",
+        title: "Search messages",
+        detail: "Look up recent Slack messages before deciding what to post or summarize.",
+        configSummary: [
+          "Searches recent Slack conversation history",
+          "Useful for context-aware follow-up actions",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "slack-lookup-users",
+        provider: "slack",
+        kind: "lookup",
+        title: "Lookup users/channels",
+        detail: "Resolve Slack people or channels dynamically before sending updates.",
+        configSummary: [
+          "Supports dynamic channel and owner routing",
+          "Helps workflows stay reusable across teams",
+        ],
+        availability: "preview",
+      },
+    ],
+  },
+  {
+    id: "salesforce",
+    title: "Salesforce",
+    description: "CRM steps for reading and staging record updates inside larger automations.",
+    options: [
+      {
+        id: "salesforce-query-records",
+        provider: "salesforce",
+        kind: "query",
+        title: "Query records",
+        detail: "Run a targeted records query to feed leads, contacts, or opportunities into the workflow.",
+        configSummary: [
+          "Designed for structured record retrieval",
+          "Feeds CRM data into downstream routing decisions",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "salesforce-search-records",
+        provider: "salesforce",
+        kind: "search",
+        title: "Search records",
+        detail: "Search Salesforce objects by keyword before selecting the next action.",
+        configSummary: [
+          "Helps locate related accounts and contacts quickly",
+          "Supports interactive CRM lookup flows",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "salesforce-create-record",
+        provider: "salesforce",
+        kind: "write",
+        title: "Create record",
+        detail: "Stage creation of a Salesforce record when the workflow produces a new lead or case.",
+        configSummary: [
+          "Targets standard CRM creation flows",
+          "Useful for intake and handoff automations",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "salesforce-update-record",
+        provider: "salesforce",
+        kind: "write",
+        title: "Update record",
+        detail: "Prepare a record update step for ownership, status, or follow-up changes.",
+        configSummary: [
+          "Supports staged CRM status and field updates",
+          "Fits sales and support orchestration patterns",
+        ],
+        availability: "preview",
+      },
+    ],
+  },
+  {
+    id: "calendar",
+    title: "Google Calendar",
+    description: "Calendar discovery and event creation steps for follow-up scheduling.",
+    options: [
+      {
+        id: "calendar-search-events",
+        provider: "google-calendar",
+        kind: "search",
+        title: "Search events",
+        detail: "Look up upcoming events before proposing time or sending a recap.",
+        configSummary: [
+          "Reads the target calendar for scheduling context",
+          "Useful before creating a follow-up event",
+        ],
+        availability: "preview",
+      },
+      {
+        id: "calendar-create-event",
+        provider: "google-calendar",
+        kind: "write",
+        title: "Create event",
+        detail: "Stage a calendar event when the workflow determines a follow-up should be scheduled.",
+        configSummary: [
+          "Creates a structured event from workflow output",
+          "Fits reminders, reviews, and handoff scheduling",
+        ],
+        availability: "preview",
+      },
+    ],
+  },
+];
+
 export type WorkflowStatus = "draft" | "active";
 
 export type StepStatus = "ready" | "attention";
@@ -21,7 +394,7 @@ export type WorkflowTrigger = {
 
 export type WorkflowStep = {
   id: string;
-  provider: IntegrationProvider;
+  provider: StepProvider;
   kind: string;
   title: string;
   detail: string;
@@ -120,6 +493,42 @@ function slug(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "")
     .slice(0, 32);
+}
+
+export function isIntegrationStepProvider(
+  provider: StepProvider,
+): provider is IntegrationProvider {
+  return (INTEGRATION_PROVIDERS as readonly string[]).includes(provider);
+}
+
+export function getStepCatalogOption(optionId: string) {
+  return STEP_OPTION_GROUPS.flatMap((group) => group.options).find(
+    (option) => option.id === optionId,
+  );
+}
+
+export function buildWorkflowStepFromOption(optionId: string): WorkflowStep {
+  const option = getStepCatalogOption(optionId);
+
+  if (!option) {
+    throw new Error("Step option not found.");
+  }
+
+  return {
+    id: `${slug(option.title)}-${Date.now().toString(36)}`,
+    provider: option.provider,
+    kind: option.kind,
+    title: option.title,
+    detail: option.detail,
+    status: option.availability === "live" ? "ready" : "attention",
+    configSummary:
+      option.availability === "live"
+        ? option.configSummary
+        : [
+            ...option.configSummary,
+            "Connector execution is staged as a preview while runtime support is being wired.",
+          ],
+  };
 }
 
 function normalizePrompt(prompt: string) {

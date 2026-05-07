@@ -1,7 +1,18 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-const providerValidator = v.union(v.literal("gmail"), v.literal("outlook"));
+const integrationProviderValidator = v.union(
+  v.literal("gmail"),
+  v.literal("outlook"),
+);
+const stepProviderValidator = v.union(
+  integrationProviderValidator,
+  v.literal("google-drive"),
+  v.literal("google-docs"),
+  v.literal("slack"),
+  v.literal("salesforce"),
+  v.literal("google-calendar"),
+);
 const connectionStatusValidator = v.union(
   v.literal("connected"),
   v.literal("disconnected"),
@@ -18,7 +29,7 @@ const runStatusValidator = v.union(
 
 const stepValidator = v.object({
   id: v.string(),
-  provider: providerValidator,
+  provider: stepProviderValidator,
   kind: v.string(),
   title: v.string(),
   detail: v.string(),
@@ -39,7 +50,7 @@ export default defineSchema({
     description: v.string(),
     prompt: v.string(),
     status: workflowStatusValidator,
-    requirements: v.array(providerValidator),
+    requirements: v.array(integrationProviderValidator),
     trigger: v.object({
       label: v.string(),
       cadence: v.string(),
@@ -51,7 +62,7 @@ export default defineSchema({
   }).index("by_owner", ["ownerId"]),
   connections: defineTable({
     ownerId: v.string(),
-    provider: providerValidator,
+    provider: integrationProviderValidator,
     category: v.optional(v.literal("mail")),
     status: connectionStatusValidator,
     email: v.optional(v.string()),
