@@ -1,12 +1,14 @@
 import { Suspense } from "react";
 
-import { WorkflowStudio } from "@/components/workflow-studio";
+import { WorkflowDashboard } from "@/components/workflow-dashboard";
 import { isClerkEnabled } from "@/lib/server/auth";
+
+export const dynamic = "force-dynamic";
 
 export default function Home() {
   return (
-    <Suspense fallback={<div className="h-screen" />}>
-      <WorkflowStudio authEnabled={isClerkEnabled()} />
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <WorkflowDashboard authEnabled={isClerkEnabled()} />
     </Suspense>
   );
 }

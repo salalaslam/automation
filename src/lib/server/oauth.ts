@@ -22,6 +22,7 @@ type OAuthProviderConfig = OAuthProviderBaseConfig & {
 type OAuthCookiePayload = {
   ownerId: string;
   state: string;
+  returnTo?: string;
 };
 
 export type RefreshedAccessToken = {
@@ -141,10 +142,26 @@ export function hasOAuthCredentials(config: OAuthProviderConfig) {
   return Boolean(config.clientId && config.clientSecret);
 }
 
-export function createOAuthCookiePayload(ownerId: string): OAuthCookiePayload {
+export function sanitizeReturnToPath(returnTo?: string | null) {
+  if (!returnTo) {
+    return undefined;
+  }
+
+  if (!returnTo.startsWith("/") || returnTo.startsWith("//")) {
+    return undefined;
+  }
+
+  return returnTo;
+}
+
+export function createOAuthCookiePayload(
+  ownerId: string,
+  returnTo?: string,
+): OAuthCookiePayload {
   return {
     ownerId,
     state: randomUUID(),
+    returnTo: sanitizeReturnToPath(returnTo),
   };
 }
 

@@ -11,7 +11,20 @@ import {
   getOAuthConfig,
   getOAuthCookieName,
   hasOAuthCredentials,
+  sanitizeReturnToPath,
 } from "@/lib/server/oauth";
+
+function buildReturnUrl(
+  request: NextRequest,
+  provider: IntegrationProvider,
+  oauthState: "missing_config" | "failed" | "connected",
+  returnTo?: string,
+) {
+  const url = new URL(returnTo ?? "/", request.url);
+  url.searchParams.set("oauth", oauthState);
+  url.searchParams.set("provider", provider);
+  return url;
+}
 
 function assertProvider(provider: string): IntegrationProvider {
   if (isIntegrationProvider(provider)) {
@@ -29,15 +42,18 @@ export async function GET(
     const { provider: providerParam } = await context.params;
     const provider = assertProvider(providerParam);
     const config = getOAuthConfig(provider, request);
+    const returnTo = sanitizeReturnToPath(
+      request.nextUrl.searchParams.get("returnTo"),
+    );
 
     if (!hasOAuthCredentials(config)) {
       return NextResponse.redirect(
-        new URL(`/?oauth=missing_config&provider=${provider}`, request.url),
+        buildReturnUrl(request, provider, "missing_config", returnTo),
       );
     }
 
     const ownerId = await getRequestOwnerId();
-    const cookiePayload = createOAuthCookiePayload(ownerId);
+    const cookiePayload = createOAuthCookiePayload(ownerId, returnTo);
     const params = new URLSearchParams({
       client_id: config.clientId!,
       redirect_uri: config.redirectUri,

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   CalendarClock,
   CheckCircle2,
@@ -8,48 +9,48 @@ import {
   Loader2,
   MoreHorizontal,
   Play,
-  Plus,
   Power,
   Save,
   ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { buttonVariants, Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { PROVIDER_META, type IntegrationProvider } from "@/lib/provider-catalog";
 import {
-  DashboardData,
-  WorkflowRecord,
-  WorkflowRunSummary,
+  type WorkflowRecord,
+  type WorkflowRunSummary,
   formatTimestamp,
   getConnectionReadiness,
 } from "@/lib/workflow-model";
-import {
-  PROVIDER_META,
-  type IntegrationProvider,
-} from "@/lib/provider-catalog";
 import { cn } from "@/lib/utils";
 
+import {
+  ApiError,
+  AuthorizationDialog,
+  ConnectionBadge,
+  ProviderIcon,
+  SignInState,
+  UserControls,
+  buildConnectionHref,
+  getMutationErrorMessage,
+  requestJson,
+  useDashboardQuery,
+} from "./workflow-shared";
+
 const TRIGGER_ID = "__trigger__";
+const defaultPrompt =
+  "Clean Gmail and Outlook inboxes every morning and send me a short recap.";
 
 type WorkflowStudioProps = {
   authEnabled: boolean;
+  workflowId?: string;
+  initialPrompt?: string;
 };
 
 type ToggleWorkflowResponse =
@@ -74,186 +75,18 @@ type GeneratedWorkflowResponse = {
   workflow: WorkflowRecord;
 };
 
-class ApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-  ) {
-    super(message);
-  }
-}
-
-function getMutationErrorMessage(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Request failed.";
-}
-
-async function requestJson<T>(input: string, init?: RequestInit) {
-  const response = await fetch(input, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-
-  const payload = await response
-    .json()
-    .catch(() => ({ error: "The server returned an invalid response." }));
-
-  if (!response.ok) {
-    throw new ApiError(
-      typeof payload.error === "string" ? payload.error : "Request failed.",
-      response.status,
-    );
-  }
-
-  return payload as T;
-}
-
-function ProviderIcon({ provider }: { provider: IntegrationProvider }) {
-  const meta = PROVIDER_META[provider];
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={meta.iconUrl}
-      alt={meta.label}
-      width={14}
-      height={14}
-      className="shrink-0 object-contain"
-      loading="eager"
-    />
-  );
-}
-
-function ConnectionBadge({
-  status,
-}: {
-  status: "connected" | "disconnected" | "needs_reconnect";
-}) {
-  if (status === "connected") {
-    return (
-      <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
-        Connected
-      </span>
-    );
-  }
-
-  if (status === "needs_reconnect") {
-    return (
-      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-        Reconnect
-      </span>
-    );
-  }
-
-  return (
-    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      Not connected
-    </span>
-  );
-}
-
-function UserControls() {
-  const { isSignedIn } = useUser();
-  if (!isSignedIn) {
-    return (
-      <SignInButton mode="modal">
-        <Button size="sm" className="h-6 text-[11px]">
-          Sign in
-        </Button>
-      </SignInButton>
-    );
-  }
-  return <UserButton />;
-}
-
-function SignInState() {
-  return (
-    <div className="flex h-screen items-center justify-center p-6">
-      <div className="max-w-sm space-y-3 text-center">
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Sign in required</p>
-          <p className="text-xs text-muted-foreground">
-            Sign in with Clerk to load your workflow workspace and connect accounts.
-          </p>
-        </div>
-        <SignInButton mode="modal">
-          <Button size="sm" className="h-8 text-xs">
-            Sign in to continue
-          </Button>
-        </SignInButton>
-      </div>
-    </div>
-  );
-}
-
-function AuthorizationDialog({
-  open,
-  providers,
-  onOpenChange,
-}: {
-  open: boolean;
-  providers: IntegrationProvider[];
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm gap-3">
-        <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">Authorization required</DialogTitle>
-          <DialogDescription className="text-xs">
-            Connect the following accounts to enable this workflow.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          {providers.map((provider) => (
-            <div
-              key={provider}
-              className="flex items-center justify-between rounded border px-3 py-2"
-            >
-              <div className="flex items-center gap-2">
-                <ProviderIcon provider={provider} />
-                <span className="text-xs font-medium">{PROVIDER_META[provider].label}</span>
-              </div>
-              <Button
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => window.location.assign(`/api/connections/${provider}/connect`)}
-              >
-                {PROVIDER_META[provider].buttonLabel}
-              </Button>
-            </div>
-          ))}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full text-xs"
-          onClick={() => onOpenChange(false)}
-        >
-          Close
-        </Button>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
+export function WorkflowStudio({
+  authEnabled,
+  workflowId,
+  initialPrompt,
+}: WorkflowStudioProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const [prompt, setPrompt] = useState(
-    "Clean Gmail and Outlook inboxes every morning and send me a short recap.",
-  );
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const dashboardQuery = useDashboardQuery();
+
+  const [prompt, setPrompt] = useState(initialPrompt ?? defaultPrompt);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [authorizationProviders, setAuthorizationProviders] = useState<
     IntegrationProvider[]
@@ -261,10 +94,14 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   const [authorizationOpen, setAuthorizationOpen] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
 
-  const dashboardQuery = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => requestJson<DashboardData>("/api/dashboard"),
-  });
+  const cleanSearch = useMemo(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("oauth");
+    params.delete("provider");
+    return params.toString();
+  }, [searchParams]);
+
+  const returnTo = cleanSearch ? `${pathname}?${cleanSearch}` : pathname;
 
   const generateWorkflowMutation = useMutation({
     mutationFn: () =>
@@ -273,10 +110,10 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
         body: JSON.stringify({ prompt }),
       }),
     onSuccess: ({ workflow }) => {
-      setSelectedWorkflowId(workflow._id);
       setSelectedStepId(null);
       setBanner("Stub workflow created.");
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      router.replace(`/workflows/${workflow._id}`);
     },
     onError: (error) => {
       setBanner(getMutationErrorMessage(error));
@@ -284,8 +121,8 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   });
 
   const toggleWorkflowMutation = useMutation({
-    mutationFn: (workflowId: string) =>
-      requestJson<ToggleWorkflowResponse>(`/api/workflows/${workflowId}/toggle`, {
+    mutationFn: (targetWorkflowId: string) =>
+      requestJson<ToggleWorkflowResponse>(`/api/workflows/${targetWorkflowId}/toggle`, {
         method: "POST",
       }),
     onSuccess: (response) => {
@@ -294,6 +131,7 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
         setAuthorizationOpen(true);
         return;
       }
+
       setBanner(
         response.status === "active" ? "Workflow turned on." : "Workflow moved to draft.",
       );
@@ -305,8 +143,8 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   });
 
   const testRunMutation = useMutation({
-    mutationFn: (workflowId: string) =>
-      requestJson<TestRunResponse>(`/api/workflows/${workflowId}/test-run`, {
+    mutationFn: (targetWorkflowId: string) =>
+      requestJson<TestRunResponse>(`/api/workflows/${targetWorkflowId}/test-run`, {
         method: "POST",
       }),
     onSuccess: ({ run }) => {
@@ -327,35 +165,47 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
     [dashboardQuery.data?.connections],
   );
 
-  const effectiveWorkflowId = selectedWorkflowId ?? workflows[0]?._id ?? null;
   const selectedWorkflow = useMemo(
-    () => workflows.find((w) => w._id === effectiveWorkflowId) ?? workflows[0],
-    [effectiveWorkflowId, workflows],
+    () => (workflowId ? workflows.find((workflow) => workflow._id === workflowId) ?? null : null),
+    [workflowId, workflows],
   );
 
   const selectedStep = useMemo(
     () =>
       selectedStepId && selectedStepId !== TRIGGER_ID
-        ? (selectedWorkflow?.steps.find((s) => s.id === selectedStepId) ?? null)
+        ? (selectedWorkflow?.steps.find((step) => step.id === selectedStepId) ?? null)
         : null,
     [selectedStepId, selectedWorkflow],
   );
 
   const showTriggerPanel = selectedStepId === TRIGGER_ID;
   const showRightPanel = Boolean(selectedStep) || showTriggerPanel;
-
   const oauthState = searchParams.get("oauth");
   const oauthProvider = searchParams.get("provider");
 
   const oauthBanner = useMemo(() => {
-    if (!oauthState || !oauthProvider) return null;
+    if (!oauthState || !oauthProvider) {
+      return null;
+    }
+
     const label = oauthProvider === "gmail" ? "Gmail" : "Outlook Email";
-    if (oauthState === "connected") return `${label} connected.`;
+
+    if (oauthState === "connected") {
+      return `${label} connected.`;
+    }
+
     if (oauthState === "insufficient_scope") {
       return `${label} is missing mailbox permissions. Reconnect and approve the requested access.`;
     }
-    if (oauthState === "missing_config") return `${label} OAuth credentials are missing.`;
-    if (oauthState === "failed") return `${label} authorization failed.`;
+
+    if (oauthState === "missing_config") {
+      return `${label} OAuth credentials are missing.`;
+    }
+
+    if (oauthState === "failed") {
+      return `${label} authorization failed.`;
+    }
+
     return null;
   }, [oauthProvider, oauthState]);
 
@@ -366,28 +216,32 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
   }, [oauthState, queryClient]);
 
   const connectedProviders = new Set(
-    connections.filter(getConnectionReadiness).map((c) => c.provider),
+    connections.filter(getConnectionReadiness).map((connection) => connection.provider),
   );
 
   const missingProvidersForSelected =
-    selectedWorkflow?.requirements.filter((p) => !connectedProviders.has(p)) ?? [];
+    selectedWorkflow?.requirements.filter((provider) => !connectedProviders.has(provider)) ?? [];
 
   if (dashboardQuery.isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#f8f6f1]">
         <Loader2 className="size-4 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (dashboardQuery.error) {
-    if (authEnabled && dashboardQuery.error instanceof ApiError && dashboardQuery.error.status === 401) {
+    if (
+      authEnabled &&
+      dashboardQuery.error instanceof ApiError &&
+      dashboardQuery.error.status === 401
+    ) {
       return <SignInState />;
     }
 
     return (
-      <div className="flex h-screen items-center justify-center p-6">
-        <div className="max-w-xs space-y-1">
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="max-w-xs space-y-1 text-center">
           <p className="text-sm font-medium">Convex is not connected</p>
           <p className="text-xs text-muted-foreground">
             {dashboardQuery.error instanceof ApiError
@@ -399,199 +253,282 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
     );
   }
 
+  if (workflowId && !selectedWorkflow) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f8f6f1] px-6">
+        <div className="max-w-md rounded-[28px] border border-black/10 bg-white px-8 py-10 text-center shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+          <p className="text-sm font-medium text-zinc-900">Workflow not found</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The selected workflow is no longer available. Return to the dashboard or create a new one.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full")}
+            >
+              Back to dashboard
+            </Link>
+            <Link
+              href="/workflows/new"
+              className={cn(buttonVariants({ size: "sm" }), "rounded-full")}
+            >
+              Create workflow
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <AuthorizationDialog
         open={authorizationOpen}
         providers={authorizationProviders}
         onOpenChange={setAuthorizationOpen}
+        returnTo={returnTo}
       />
 
-      <div className="flex h-screen overflow-hidden bg-white text-xs">
-        {/* ── Left sidebar ── */}
-        <aside className="flex w-64 shrink-0 flex-col border-r bg-white">
-          <div className="flex-1 overflow-y-auto p-4">
-            <h1 className="text-base font-bold leading-snug">
-              What would you like to automate?
-            </h1>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              Describe your task and let AI build it for you
-            </p>
+      <div className="min-h-screen bg-[#f8f6f1] text-xs text-foreground lg:flex">
+        <aside className="flex w-full shrink-0 flex-col border-b border-black/10 bg-white/90 lg:min-h-screen lg:w-[24rem] lg:border-b-0 lg:border-r xl:w-[28rem]">
+          <div className="flex-1 space-y-6 p-6">
+            <div className="space-y-4">
+              <Link
+                href="/"
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900"
+              >
+                <ChevronLeft className="size-3.5" />
+                Back to dashboard
+              </Link>
 
-            {workflows.length > 0 && (
-              <div className="mt-4 space-y-0.5">
-                {workflows.map((workflow) => (
-                  <button
-                    key={workflow._id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedWorkflowId(workflow._id);
-                      setSelectedStepId(null);
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] transition-colors",
-                      effectiveWorkflowId === workflow._id
-                        ? "bg-gray-100 font-medium text-foreground"
-                        : "text-muted-foreground hover:bg-gray-50 hover:text-foreground",
+              {selectedWorkflow ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <span className="inline-flex rounded-full border border-black/10 bg-zinc-50 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-500">
+                      Active workspace
+                    </span>
+                    <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+                      {selectedWorkflow.name}
+                    </h1>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {selectedWorkflow.description}
+                    </p>
+                  </div>
+
+                  <div className="rounded-[24px] border border-black/10 bg-[#f9f7f2] p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-500">
+                      Connected apps
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedWorkflow.requirements.map((provider) => (
+                        <div
+                          key={provider}
+                          className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-2"
+                        >
+                          <ProviderIcon provider={provider} />
+                          <span className="text-[11px] font-medium text-zinc-700">
+                            {PROVIDER_META[provider].label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 pt-4 lg:pt-12">
+                  <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+                    What would you like to automate?
+                  </h1>
+                  <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                    Describe the job in plain English. The builder will create a draft workflow you can test, connect, and refine on the right.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {selectedWorkflow && (
+              <div className="rounded-[24px] border border-black/10 bg-zinc-950 px-4 py-4 text-zinc-50 shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+                <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-400">
+                  Workflow status
+                </p>
+                <div className="mt-3 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium capitalize">{selectedWorkflow.status}</p>
+                    <p className="mt-1 text-[11px] text-zinc-400">
+                      Updated {formatTimestamp(selectedWorkflow.updatedAt)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {missingProvidersForSelected.length > 0 ? (
+                      <CircleAlert className="size-4 text-amber-300" />
+                    ) : (
+                      <ShieldCheck className="size-4 text-emerald-300" />
                     )}
-                  >
-                    {workflow.requirements.slice(0, 1).map((p) => (
-                      <ProviderIcon key={p} provider={p} />
-                    ))}
-                    <span className="min-w-0 truncate">{workflow.name}</span>
-                  </button>
-                ))}
+                    <span className="text-[11px] text-zinc-300">
+                      {missingProvidersForSelected.length > 0
+                        ? `${missingProvidersForSelected.length} connection${
+                            missingProvidersForSelected.length === 1 ? "" : "s"
+                          } missing`
+                        : "Ready to run"}
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Bottom prompt */}
-          <div className="border-t">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && prompt.trim()) {
-                  e.preventDefault();
-                  generateWorkflowMutation.mutate();
-                }
-              }}
-              placeholder="Describe what you want to automate..."
-              className="min-h-[60px] resize-none border-0 bg-transparent px-3 py-2 text-[11px] shadow-none focus-visible:ring-0"
-            />
-            <div className="flex items-center justify-between gap-1 px-2 pb-2">
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="size-6">
-                  <Plus className="size-3" />
+          <div className="border-t border-black/10 bg-white p-4">
+            <div className="rounded-[24px] border border-black/10 bg-[#fbfaf6] p-3 shadow-[0_8px_30px_rgba(15,23,42,0.04)]">
+              <Textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && prompt.trim()) {
+                    event.preventDefault();
+                    generateWorkflowMutation.mutate();
+                  }
+                }}
+                placeholder="Describe what you want to automate..."
+                className="min-h-24 resize-none border-0 bg-transparent px-1 py-1 text-sm leading-6 shadow-none focus-visible:ring-0"
+              />
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {!authEnabled && (
+                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-medium text-zinc-500">
+                      Demo mode
+                    </span>
+                  )}
+                  {authEnabled && <UserControls />}
+                </div>
+                <Button
+                  size="sm"
+                  className="rounded-full px-4"
+                  disabled={generateWorkflowMutation.isPending || !prompt.trim()}
+                  onClick={() => generateWorkflowMutation.mutate()}
+                >
+                  {generateWorkflowMutation.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
+                  )}
+                  Generate
                 </Button>
-                {!authEnabled && (
-                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                    Demo
-                  </span>
-                )}
-                {authEnabled && <UserControls />}
               </div>
-              <Button
-                size="sm"
-                className="h-6 gap-1 px-2 text-[11px]"
-                disabled={generateWorkflowMutation.isPending || !prompt.trim()}
-                onClick={() => generateWorkflowMutation.mutate()}
-              >
-                {generateWorkflowMutation.isPending ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <Sparkles className="size-3" />
-                )}
-                Generate
-              </Button>
             </div>
           </div>
         </aside>
 
-        {/* ── Center canvas ── */}
         <main className="flex min-w-0 flex-1 flex-col">
-          {/* Header */}
-          <header className="flex h-10 items-center justify-between border-b px-3">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="size-6">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white/70 px-4 py-3 backdrop-blur sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              <Link
+                href="/"
+                className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "rounded-full lg:hidden")}
+              >
                 <ChevronLeft className="size-3.5" />
-              </Button>
-              {selectedWorkflow && (
-                <>
-                  <div className="flex items-center gap-1">
-                    {selectedWorkflow.requirements.slice(0, 2).map((p) => (
-                      <ProviderIcon key={p} provider={p} />
-                    ))}
-                  </div>
-                  <span className="font-medium">{selectedWorkflow.name}</span>
-                  <span
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-[10px] font-medium",
-                      selectedWorkflow.status === "active"
-                        ? "bg-green-100 text-green-700"
-                        : "bg-gray-100 text-muted-foreground",
-                    )}
-                  >
-                    {selectedWorkflow.status}
-                  </span>
-                </>
-              )}
+              </Link>
+              <div className="min-w-0">
+                <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-500">
+                  Workflow builder
+                </p>
+                <div className="mt-1 flex min-w-0 items-center gap-2">
+                  {selectedWorkflow ? (
+                    <>
+                      <span className="truncate text-sm font-medium text-zinc-900">
+                        {selectedWorkflow.name}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
+                          selectedWorkflow.status === "active"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-zinc-100 text-zinc-500",
+                        )}
+                      >
+                        {selectedWorkflow.status}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-sm font-medium text-zinc-900">Draft workflow</span>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              {authEnabled && <UserControls />}
-              <Button variant="outline" size="sm" className="h-6 text-[11px]">
-                My Workflow
-              </Button>
+              <Link
+                href="/"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-full")}
+              >
+                Dashboard
+              </Link>
             </div>
           </header>
 
-          {/* Banner */}
           {(banner ?? oauthBanner) && (
-            <div className="border-b bg-blue-50 px-3 py-1.5 text-[11px] text-blue-700">
+            <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-[11px] text-blue-700 sm:px-6">
               {banner ?? oauthBanner}
             </div>
           )}
 
-          {/* Workflow canvas */}
           {selectedWorkflow ? (
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              <div className="mx-auto max-w-md">
-                {/* STARTER */}
+            <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+              <div className="mx-auto max-w-xl rounded-[32px] border border-black/10 bg-white/85 px-5 py-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] sm:px-8">
                 <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
                     Starter
                   </p>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <button
                       type="button"
                       onClick={() =>
                         setSelectedStepId(selectedStepId === TRIGGER_ID ? null : TRIGGER_ID)
                       }
                       className={cn(
-                        "flex flex-1 items-center gap-2 rounded border px-2.5 py-1.5 text-left text-[11px] transition-colors",
+                        "flex flex-1 items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-colors",
                         selectedStepId === TRIGGER_ID
                           ? "border-blue-300 bg-blue-50"
-                          : "border-border bg-white hover:bg-gray-50",
+                          : "border-black/10 bg-white hover:bg-zinc-50",
                       )}
                     >
-                      <CalendarClock className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="font-medium">Step 1: {selectedWorkflow.trigger.cadence}</span>
-                      <MoreHorizontal className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+                      <CalendarClock className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="font-medium">
+                        Step 1: {selectedWorkflow.trigger.cadence}
+                      </span>
+                      <MoreHorizontal className="ml-auto size-4 shrink-0 text-muted-foreground" />
                     </button>
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
                       Next run: {selectedWorkflow.trigger.cadence}
                     </span>
                   </div>
                 </div>
 
-                {/* ACTIONS */}
                 {selectedWorkflow.steps.length > 0 && (
-                  <div className="mt-3">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  <div className="mt-5">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
                       Actions
                     </p>
-                    {selectedWorkflow.steps.map((step, i) => (
+                    {selectedWorkflow.steps.map((step, index) => (
                       <div key={step.id} className="flex flex-col">
-                        <div className="mx-auto h-3 w-px bg-border" />
+                        <div className="mx-auto h-4 w-px bg-border" />
                         <button
                           type="button"
                           onClick={() =>
                             setSelectedStepId(selectedStepId === step.id ? null : step.id)
                           }
                           className={cn(
-                            "flex items-center gap-2 rounded border px-2.5 py-1.5 text-left text-[11px] transition-colors",
+                            "flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-colors",
                             selectedStepId === step.id
                               ? "border-blue-300 bg-blue-50"
-                              : "border-border bg-white hover:bg-gray-50",
+                              : "border-black/10 bg-white hover:bg-zinc-50",
                           )}
                         >
                           <ProviderIcon provider={step.provider} />
                           <span className="font-medium">
-                            Step {i + 2}: {step.title}
+                            Step {index + 2}: {step.title}
                           </span>
                           <span
                             className={cn(
-                              "ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
+                              "ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
                               step.status === "ready"
                                 ? "bg-green-100 text-green-700"
                                 : "bg-amber-100 text-amber-700",
@@ -599,15 +536,15 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                           >
                             {step.status}
                           </span>
-                          <MoreHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
+                          <MoreHorizontal className="size-4 shrink-0 text-muted-foreground" />
                         </button>
                       </div>
                     ))}
                     <div className="flex flex-col items-center">
-                      <div className="h-3 w-px bg-border" />
+                      <div className="h-4 w-px bg-border" />
                       <button
                         type="button"
-                        className="rounded border border-dashed px-3 py-1 text-[11px] text-muted-foreground hover:border-gray-400 hover:text-foreground"
+                        className="rounded-full border border-dashed border-black/20 px-4 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-zinc-400 hover:text-foreground"
                       >
                         + Add step
                       </button>
@@ -617,86 +554,89 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
               </div>
             </div>
           ) : (
-            <div className="flex flex-1 items-center justify-center">
-              <p className="text-[11px] text-muted-foreground">
-                Generate your first workflow using the prompt on the left.
-              </p>
+            <div className="flex flex-1 items-center justify-center px-6 py-16">
+              <div className="max-w-md text-center">
+                <p className="text-lg font-medium text-zinc-900">Generate your first workflow</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Use the prompt composer on the left to create a draft. Once generated, this page becomes the dedicated workflow editor.
+                </p>
+              </div>
             </div>
           )}
 
-          {/* Bottom action bar */}
           {selectedWorkflow && (
-            <div className="flex h-10 items-center justify-between border-t px-3">
-              <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-black/10 bg-white px-4 py-3 sm:px-6">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1 text-[11px]"
+                  className="rounded-full"
                   disabled={testRunMutation.isPending}
                   onClick={() => testRunMutation.mutate(selectedWorkflow._id)}
                 >
                   {testRunMutation.isPending ? (
-                    <Loader2 className="size-3 animate-spin" />
+                    <Loader2 className="size-3.5 animate-spin" />
                   ) : (
-                    <Play className="size-3" />
+                    <Play className="size-3.5" />
                   )}
                   Test run
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1 text-[11px]"
+                  className="rounded-full"
                   disabled={toggleWorkflowMutation.isPending}
                   onClick={() => toggleWorkflowMutation.mutate(selectedWorkflow._id)}
                 >
                   {toggleWorkflowMutation.isPending ? (
-                    <Loader2 className="size-3 animate-spin" />
+                    <Loader2 className="size-3.5 animate-spin" />
                   ) : (
-                    <Power className="size-3" />
+                    <Power className="size-3.5" />
                   )}
                   {selectedWorkflow.status === "active" ? "Turn off" : "Turn on"}
                 </Button>
               </div>
               <Button
                 size="sm"
-                className="h-7 gap-1 text-[11px]"
+                className="rounded-full"
                 onClick={() => void queryClient.invalidateQueries({ queryKey: ["dashboard"] })}
               >
-                <Save className="size-3" />
-                Save Changes
+                <Save className="size-3.5" />
+                Save changes
               </Button>
             </div>
           )}
         </main>
 
-        {/* ── Right panel ── */}
-        {showRightPanel && (
-          <aside className="flex w-72 shrink-0 flex-col border-l bg-white">
-            {showTriggerPanel && selectedWorkflow && (
+        {showRightPanel && selectedWorkflow && (
+          <aside className="w-full shrink-0 border-t border-black/10 bg-white lg:min-h-screen lg:w-80 lg:border-l lg:border-t-0 xl:w-96">
+            {showTriggerPanel && (
               <>
-                <div className="flex h-10 items-center justify-between border-b px-3">
-                  <span className="font-medium">Step 1</span>
+                <div className="flex items-center justify-between border-b border-black/10 px-4 py-3">
+                  <span className="font-medium text-zinc-900">Step 1</span>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6"
+                    size="icon-sm"
+                    className="rounded-full"
                     onClick={() => setSelectedStepId(null)}
                   >
                     <X className="size-3.5" />
                   </Button>
                 </div>
-                <div className="overflow-y-auto p-3 space-y-3">
+                <div className="space-y-4 p-4">
                   <div>
-                    <h2 className="font-semibold">On a schedule</h2>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    <h2 className="text-sm font-semibold text-zinc-900">On a schedule</h2>
+                    <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
                       Runs this workflow automatically at the configured cadence.
                     </p>
                   </div>
-                  <div className="rounded border px-2.5 py-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <div className="rounded-2xl border border-black/10 px-4 py-3">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-500">
                       Cadence
                     </p>
-                    <p className="mt-0.5 font-medium">{selectedWorkflow.trigger.cadence}</p>
+                    <p className="mt-1 text-sm font-medium text-zinc-900">
+                      {selectedWorkflow.trigger.cadence}
+                    </p>
                   </div>
                 </div>
               </>
@@ -704,50 +644,56 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
 
             {selectedStep && (
               <>
-                <div className="flex h-10 items-center justify-between border-b px-3">
-                  <span className="font-medium">
-                    Step{" "}
-                    {(selectedWorkflow?.steps.findIndex((s) => s.id === selectedStep.id) ?? -1) +
-                      2}
+                <div className="flex items-center justify-between border-b border-black/10 px-4 py-3">
+                  <span className="font-medium text-zinc-900">
+                    Step {(selectedWorkflow.steps.findIndex((step) => step.id === selectedStep.id) ?? -1) + 2}
                   </span>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6"
+                    size="icon-sm"
+                    className="rounded-full"
                     onClick={() => setSelectedStepId(null)}
                   >
                     <X className="size-3.5" />
                   </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                <div className="space-y-4 p-4">
                   <div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2">
                       <ProviderIcon provider={selectedStep.provider} />
-                      <h2 className="font-semibold">{selectedStep.title}</h2>
+                      <h2 className="text-sm font-semibold text-zinc-900">{selectedStep.title}</h2>
                     </div>
-                    <p className="mt-1 text-[11px] text-muted-foreground">{selectedStep.detail}</p>
+                    <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                      {selectedStep.detail}
+                    </p>
                   </div>
 
                   {selectedStep.configSummary.length > 0 && (
-                    <div className="space-y-1">
+                    <div className="space-y-2">
                       {selectedStep.configSummary.map((item) => (
-                        <div key={item} className="flex items-start gap-1.5 rounded border px-2.5 py-2">
-                          <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-green-600" />
-                          <span className="text-[11px]">{item}</span>
+                        <div
+                          key={item}
+                          className="flex items-start gap-2 rounded-2xl border border-black/10 px-4 py-3"
+                        >
+                          <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-green-600" />
+                          <span className="text-[11px] leading-5 text-zinc-700">{item}</span>
                         </div>
                       ))}
                     </div>
                   )}
 
                   {connections
-                    .filter((c) => c.provider === selectedStep.provider)
+                    .filter((connection) => connection.provider === selectedStep.provider)
                     .map((connection) => (
-                      <div key={connection.provider} className="rounded border px-2.5 py-2">
+                      <div
+                        key={connection.provider}
+                        className="rounded-2xl border border-black/10 px-4 py-3"
+                      >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-2">
                             <ProviderIcon provider={connection.provider} />
                             <div>
-                              <p className="font-medium">
+                              <p className="text-sm font-medium text-zinc-900">
                                 {PROVIDER_META[connection.provider].label}
                               </p>
                               {connection.email && (
@@ -763,10 +709,10 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-6 text-[11px]"
+                              className="h-7 rounded-full text-[11px]"
                               onClick={() =>
                                 window.location.assign(
-                                  `/api/connections/${connection.provider}/connect`,
+                                  buildConnectionHref(connection.provider, returnTo),
                                 )
                               }
                             >
@@ -776,11 +722,12 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                             </Button>
                           )}
                         </div>
+
                         {(connection.connectedAt ||
                           connection.lastSyncedAt ||
                           connection.lastError ||
                           connection.expiresAt) && (
-                          <div className="mt-2 space-y-1 text-[10px] text-muted-foreground">
+                          <div className="mt-3 space-y-1 text-[10px] leading-5 text-muted-foreground">
                             {connection.connectedAt && (
                               <p>Connected: {formatTimestamp(connection.connectedAt)}</p>
                             )}
@@ -803,23 +750,23 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                       </div>
                     ))}
 
-                  <div className="rounded border px-2.5 py-2">
-                    <div className="flex items-center gap-1.5">
+                  <div className="rounded-2xl border border-black/10 px-4 py-3">
+                    <div className="flex items-center gap-2">
                       {missingProvidersForSelected.length > 0 ? (
-                        <CircleAlert className="size-3 shrink-0 text-amber-600" />
+                        <CircleAlert className="size-3.5 shrink-0 text-amber-600" />
                       ) : (
-                        <ShieldCheck className="size-3 shrink-0 text-green-600" />
+                        <ShieldCheck className="size-3.5 shrink-0 text-green-600" />
                       )}
-                      <span className="text-[11px] font-medium">
+                      <span className="text-[11px] font-medium text-zinc-800">
                         {missingProvidersForSelected.length > 0
                           ? "Authorization required"
                           : "Ready to run"}
                       </span>
                     </div>
-                    {selectedWorkflow?.lastRunSummary && (
+                    {selectedWorkflow.lastRunSummary && (
                       <p
                         className={cn(
-                          "mt-1 text-[10px]",
+                          "mt-2 text-[10px] leading-5",
                           selectedWorkflow.lastRunSummary.status === "error"
                             ? "text-red-700"
                             : selectedWorkflow.lastRunSummary.status === "needs_auth"
@@ -828,7 +775,7 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                         )}
                       >
                         Last run: {formatTimestamp(selectedWorkflow.lastRunSummary.timestamp)}
-                        {" — "}
+                        {" - "}
                         {selectedWorkflow.lastRunSummary.message}
                       </p>
                     )}

@@ -14,7 +14,20 @@ import {
   getOAuthCookieName,
   hasOAuthCredentials,
   parseOAuthCookiePayload,
+  sanitizeReturnToPath,
 } from "@/lib/server/oauth";
+
+function buildReturnUrl(
+  request: NextRequest,
+  provider: IntegrationProvider,
+  oauthState: "missing_config" | "failed" | "connected" | "insufficient_scope",
+  returnTo?: string,
+) {
+  const url = new URL(returnTo ?? "/", request.url);
+  url.searchParams.set("oauth", oauthState);
+  url.searchParams.set("provider", provider);
+  return url;
+}
 
 function assertProvider(provider: string): IntegrationProvider {
   if (isIntegrationProvider(provider)) {
@@ -34,7 +47,7 @@ export async function GET(
 
   if (!hasOAuthCredentials(config)) {
     return NextResponse.redirect(
-      new URL(`/?oauth=missing_config&provider=${provider}`, request.url),
+      buildReturnUrl(request, provider, "missing_config"),
     );
   }
 
@@ -43,7 +56,7 @@ export async function GET(
 
   if (!code || !state) {
     return NextResponse.redirect(
-      new URL(`/?oauth=failed&provider=${provider}`, request.url),
+      buildReturnUrl(request, provider, "failed"),
     );
   }
 
@@ -52,15 +65,16 @@ export async function GET(
 
   if (!oauthCookie) {
     return NextResponse.redirect(
-      new URL(`/?oauth=failed&provider=${provider}`, request.url),
+      buildReturnUrl(request, provider, "failed"),
     );
   }
 
   const cookiePayload = parseOAuthCookiePayload(oauthCookie.value);
+  const returnTo = sanitizeReturnToPath(cookiePayload.returnTo);
 
   if (cookiePayload.state !== state) {
     return NextResponse.redirect(
-      new URL(`/?oauth=failed&provider=${provider}`, request.url),
+      buildReturnUrl(request, provider, "failed", returnTo),
     );
   }
 
@@ -87,7 +101,7 @@ export async function GET(
 
   if (!tokenResponse.ok) {
     return NextResponse.redirect(
-      new URL(`/?oauth=failed&provider=${provider}`, request.url),
+      buildReturnUrl(request, provider, "failed", returnTo),
     );
   }
 
@@ -135,11 +149,11 @@ export async function GET(
   }
 
   const response = NextResponse.redirect(
-    new URL(
-      `/?oauth=${
-        hasRequiredProviderScopes(provider, scopes) ? "connected" : "insufficient_scope"
-      }&provider=${provider}`,
-      request.url,
+    buildReturnUrl(
+      request,
+      provider,
+      hasRequiredProviderScopes(provider, scopes) ? "connected" : "insufficient_scope",
+      returnTo,
     ),
   );
 
