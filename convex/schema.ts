@@ -13,6 +13,7 @@ const runStatusValidator = v.union(
   v.literal("success"),
   v.literal("pending"),
   v.literal("needs_auth"),
+  v.literal("error"),
 );
 
 const stepValidator = v.object({

@@ -8,6 +8,7 @@ const runStatusValidator = v.union(
   v.literal("success"),
   v.literal("pending"),
   v.literal("needs_auth"),
+  v.literal("error"),
 );
 
 const workflowDraftValidator = v.object({
@@ -41,20 +42,57 @@ const workflowDraftValidator = v.object({
 });
 
 const PROVIDERS = ["gmail", "outlook"] as const;
+const REQUIRED_PROVIDER_SCOPES = {
+  gmail: ["https://www.googleapis.com/auth/gmail.modify"],
+  outlook: [
+    "https://graph.microsoft.com/Mail.ReadWrite",
+    "https://graph.microsoft.com/User.Read",
+  ],
+} as const;
+const PROVIDER_LABELS = {
+  gmail: "Gmail",
+  outlook: "Outlook Email",
+} as const;
 
 function isConnectionReady(connection: { status: "connected" | "disconnected" | "needs_reconnect" }) {
   return connection.status === "connected";
+}
+
+function hasRequiredScopes(
+  provider: "gmail" | "outlook",
+  scopes: string[],
+) {
+  const grantedScopes = new Set(scopes);
+
+  return REQUIRED_PROVIDER_SCOPES[provider].every((scope) =>
+    grantedScopes.has(scope),
+  );
+}
+
+function resolveConnectionStatus(connection: {
+  provider: "gmail" | "outlook";
+  status: "connected" | "disconnected" | "needs_reconnect";
+  scopes: string[];
+}) {
+  if (connection.status !== "connected") {
+    return connection.status;
+  }
+
+  return hasRequiredScopes(connection.provider, connection.scopes)
+    ? "connected"
+    : "needs_reconnect";
 }
 
 function getConnectedProviders(
   connections: Array<{
     provider: "gmail" | "outlook";
     status: "connected" | "disconnected" | "needs_reconnect";
+    scopes: string[];
   }>,
 ) {
   return new Set(
     connections
-      .filter(isConnectionReady)
+      .filter((connection) => isConnectionReady({ status: resolveConnectionStatus(connection) }))
       .map((connection) => connection.provider),
   );
 }
@@ -194,7 +232,7 @@ export const getDashboard = query({
         .map((connection) => ({
           provider: connection.provider,
           category: connection.category ?? "mail",
-          status: connection.status,
+          status: resolveConnectionStatus(connection),
           email: connection.email,
           scopes: connection.scopes,
           canRefresh: connection.canRefresh ?? Boolean(connection.refreshToken),
@@ -252,6 +290,22 @@ export const toggleWorkflow = mutation({
         queryBuilder.eq("ownerId", args.ownerId),
       )
       .collect();
+
+    const reconnectTimestamp = Date.now();
+
+    for (const connection of connections) {
+      if (resolveConnectionStatus(connection) === "needs_reconnect" && connection.status === "connected") {
+        await ctx.db.patch(connection._id, {
+          status: "needs_reconnect",
+          canRefresh: false,
+          lastError: `${PROVIDER_LABELS[connection.provider]} needs mailbox access and must be reconnected.`,
+          updatedAt: reconnectTimestamp,
+        });
+
+        connection.status = "needs_reconnect";
+      }
+    }
+
     const connectedProviders = getConnectedProviders(connections);
     const missingProviders = workflow.requirements.filter(
       (provider) => !connectedProviders.has(provider),

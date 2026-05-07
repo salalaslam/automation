@@ -1,0 +1,8 @@
+.env*
+.vercel
+.next
+node_modules
+extracted_frames
+*.mov
+client_secret_*.json
+microsoft-keys.txt

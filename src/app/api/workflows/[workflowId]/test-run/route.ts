@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
+  hasRequiredProviderScopes,
   PROVIDER_META,
   type ConnectionState,
   type IntegrationProvider,
@@ -34,6 +35,14 @@ type ExecutionContext = {
   };
   connections: ExecutionConnection[];
 };
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unexpected server error.";
+}
 
 function isTokenStale(expiresAt?: number) {
   return typeof expiresAt === "number" && expiresAt <= Date.now() + 60_000;
@@ -127,8 +136,13 @@ async function fetchSnapshotForConnection(
       liveConnection.accessToken!,
     );
   } catch (error) {
-    if (!(error instanceof ProviderAuthError) || hasRefreshed) {
+    if (!(error instanceof ProviderAuthError)) {
       throw error;
+    }
+
+    if (hasRefreshed) {
+      await markNeedsReconnect(ownerId, liveConnection.provider, error.message);
+      return null;
     }
 
     const refreshedConnection = await storeRefreshedConnection(ownerId, liveConnection);
@@ -165,76 +179,112 @@ export async function POST(
   try {
     const ownerId = await getRequestOwnerId();
     const { workflowId } = await context.params;
-    const executionContext: ExecutionContext = await convexQuery<
-      { ownerId: string; workflowId: string },
-      ExecutionContext
-    >("automation:getWorkflowExecutionContext", {
-      ownerId,
-      workflowId,
-    });
-    const syncedProviders: IntegrationProvider[] = [];
-    const summaryParts: string[] = [];
-    const reconnectProviders: IntegrationProvider[] = [];
 
-    for (const provider of executionContext.workflow.requirements) {
-      const connection = executionContext.connections.find(
-        (candidate) => candidate.provider === provider,
+    try {
+      const executionContext: ExecutionContext = await convexQuery<
+        { ownerId: string; workflowId: string },
+        ExecutionContext
+      >("automation:getWorkflowExecutionContext", {
+        ownerId,
+        workflowId,
+      });
+      const syncedProviders: IntegrationProvider[] = [];
+      const summaryParts: string[] = [];
+      const reconnectProviders: IntegrationProvider[] = [];
+
+      for (const provider of executionContext.workflow.requirements) {
+        const connection = executionContext.connections.find(
+          (candidate) => candidate.provider === provider,
+        );
+
+        if (!connection || connection.status === "disconnected") {
+          reconnectProviders.push(provider);
+          continue;
+        }
+
+        if (connection.status === "needs_reconnect") {
+          reconnectProviders.push(provider);
+          continue;
+        }
+
+        if (!hasRequiredProviderScopes(provider, connection.scopes)) {
+          await markNeedsReconnect(
+            ownerId,
+            provider,
+            `${PROVIDER_META[provider].label} needs mailbox access and must be reconnected.`,
+          );
+          reconnectProviders.push(provider);
+          continue;
+        }
+
+        const snapshot = await fetchSnapshotForConnection(ownerId, connection);
+
+        if (!snapshot) {
+          reconnectProviders.push(provider);
+          continue;
+        }
+
+        syncedProviders.push(provider);
+        summaryParts.push(snapshot.summary);
+      }
+
+      const reconnectLabels = reconnectProviders.map(
+        (provider) => PROVIDER_META[provider].label,
       );
+      const runMessage =
+        reconnectLabels.length > 0
+          ? [
+              summaryParts.join(" "),
+              `${reconnectLabels.join(" and ")} ${
+                reconnectLabels.length === 1 ? "needs" : "need"
+              } to be reconnected before this workflow can run.`,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : `Live mailbox test run succeeded. ${summaryParts.join(" ")}`;
 
-      if (!connection || connection.status === "disconnected") {
-        reconnectProviders.push(provider);
-        continue;
+      const run = await convexMutation<
+        {
+          ownerId: string;
+          workflowId: string;
+          status: "success" | "needs_auth" | "error";
+          message: string;
+          syncedProviders: IntegrationProvider[];
+        },
+        WorkflowRunSummary
+      >("automation:recordTestRun", {
+        ownerId,
+        workflowId,
+        status: reconnectProviders.length > 0 ? "needs_auth" : "success",
+        message: runMessage,
+        syncedProviders,
+      });
+
+      return NextResponse.json({ workflowId, run });
+    } catch (error) {
+      try {
+        const run = await convexMutation<
+          {
+            ownerId: string;
+            workflowId: string;
+            status: "success" | "needs_auth" | "error";
+            message: string;
+            syncedProviders: IntegrationProvider[];
+          },
+          WorkflowRunSummary
+        >("automation:recordTestRun", {
+          ownerId,
+          workflowId,
+          status: "error",
+          message: `Live mailbox test run failed. ${getErrorMessage(error)}`,
+          syncedProviders: [],
+        });
+
+        return NextResponse.json({ workflowId, run });
+      } catch {
+        return handleRouteError(error);
       }
-
-      if (connection.status === "needs_reconnect") {
-        reconnectProviders.push(provider);
-        continue;
-      }
-
-      const snapshot = await fetchSnapshotForConnection(ownerId, connection);
-
-      if (!snapshot) {
-        reconnectProviders.push(provider);
-        continue;
-      }
-
-      syncedProviders.push(provider);
-      summaryParts.push(snapshot.summary);
     }
-
-    const reconnectLabels = reconnectProviders.map(
-      (provider) => PROVIDER_META[provider].label,
-    );
-    const runMessage =
-      reconnectLabels.length > 0
-        ? [
-            summaryParts.join(" "),
-            `${reconnectLabels.join(" and ")} ${
-              reconnectLabels.length === 1 ? "needs" : "need"
-            } to be reconnected before this workflow can run.`,
-          ]
-            .filter(Boolean)
-            .join(" ")
-        : `Live mailbox test run succeeded. ${summaryParts.join(" ")}`;
-
-    const run = await convexMutation<
-      {
-        ownerId: string;
-        workflowId: string;
-        status: "success" | "needs_auth";
-        message: string;
-        syncedProviders: IntegrationProvider[];
-      },
-      WorkflowRunSummary
-    >("automation:recordTestRun", {
-      ownerId,
-      workflowId,
-      status: reconnectProviders.length > 0 ? "needs_auth" : "success",
-      message: runMessage,
-      syncedProviders,
-    });
-
-    return NextResponse.json({ workflowId, run });
   } catch (error) {
     return handleRouteError(error);
   }

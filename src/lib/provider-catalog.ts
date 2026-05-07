@@ -38,6 +38,28 @@ export const PROVIDER_META: Record<
   },
 };
 
+export const PROVIDER_REQUIRED_SCOPES: Record<
+  IntegrationProvider,
+  string[]
+> = {
+  gmail: ["https://www.googleapis.com/auth/gmail.modify"],
+  outlook: [
+    "https://graph.microsoft.com/Mail.ReadWrite",
+    "https://graph.microsoft.com/User.Read",
+  ],
+};
+
+export function hasRequiredProviderScopes(
+  provider: IntegrationProvider,
+  scopes: string[],
+) {
+  const grantedScopes = new Set(scopes);
+
+  return PROVIDER_REQUIRED_SCOPES[provider].every((scope) =>
+    grantedScopes.has(scope),
+  );
+}
+
 export function isIntegrationProvider(
   value: string,
 ): value is IntegrationProvider {

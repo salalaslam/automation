@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  PROVIDER_META,
+  hasRequiredProviderScopes,
   isIntegrationProvider,
   type IntegrationProvider,
 } from "@/lib/provider-catalog";
@@ -121,8 +123,24 @@ export async function GET(
       : undefined,
   });
 
+  if (!hasRequiredProviderScopes(provider, scopes)) {
+    await convexMutation<
+      { ownerId: string; provider: IntegrationProvider; reason: string },
+      null
+    >("automation:markConnectionNeedsReconnect", {
+      ownerId: cookiePayload.ownerId,
+      provider,
+      reason: `${PROVIDER_META[provider].label} needs mailbox access and must be reconnected.`,
+    });
+  }
+
   const response = NextResponse.redirect(
-    new URL(`/?oauth=connected&provider=${provider}`, request.url),
+    new URL(
+      `/?oauth=${
+        hasRequiredProviderScopes(provider, scopes) ? "connected" : "insufficient_scope"
+      }&provider=${provider}`,
+      request.url,
+    ),
   );
 
   response.cookies.delete(getOAuthCookieName(provider));

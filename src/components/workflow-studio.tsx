@@ -83,6 +83,18 @@ class ApiError extends Error {
   }
 }
 
+function getMutationErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Request failed.";
+}
+
 async function requestJson<T>(input: string, init?: RequestInit) {
   const response = await fetch(input, {
     ...init,
@@ -266,6 +278,9 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
       setBanner("Stub workflow created.");
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
+    onError: (error) => {
+      setBanner(getMutationErrorMessage(error));
+    },
   });
 
   const toggleWorkflowMutation = useMutation({
@@ -284,6 +299,9 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
       );
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
+    onError: (error) => {
+      setBanner(getMutationErrorMessage(error));
+    },
   });
 
   const testRunMutation = useMutation({
@@ -294,6 +312,9 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
     onSuccess: ({ run }) => {
       setBanner(run.message);
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (error) => {
+      setBanner(getMutationErrorMessage(error));
     },
   });
 
@@ -330,6 +351,9 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
     if (!oauthState || !oauthProvider) return null;
     const label = oauthProvider === "gmail" ? "Gmail" : "Outlook Email";
     if (oauthState === "connected") return `${label} connected.`;
+    if (oauthState === "insufficient_scope") {
+      return `${label} is missing mailbox permissions. Reconnect and approve the requested access.`;
+    }
     if (oauthState === "missing_config") return `${label} OAuth credentials are missing.`;
     if (oauthState === "failed") return `${label} authorization failed.`;
     return null;
@@ -793,7 +817,16 @@ export function WorkflowStudio({ authEnabled }: WorkflowStudioProps) {
                       </span>
                     </div>
                     {selectedWorkflow?.lastRunSummary && (
-                      <p className="mt-1 text-[10px] text-muted-foreground">
+                      <p
+                        className={cn(
+                          "mt-1 text-[10px]",
+                          selectedWorkflow.lastRunSummary.status === "error"
+                            ? "text-red-700"
+                            : selectedWorkflow.lastRunSummary.status === "needs_auth"
+                              ? "text-amber-700"
+                              : "text-muted-foreground",
+                        )}
+                      >
                         Last run: {formatTimestamp(selectedWorkflow.lastRunSummary.timestamp)}
                         {" — "}
                         {selectedWorkflow.lastRunSummary.message}

@@ -12,7 +12,7 @@ export type WorkflowStatus = "draft" | "active";
 
 export type StepStatus = "ready" | "attention";
 
-export type RunStatus = "success" | "pending" | "needs_auth";
+export type RunStatus = "success" | "pending" | "needs_auth" | "error";
 
 export type WorkflowTrigger = {
   label: string;
