@@ -614,12 +614,12 @@ export function WorkflowStudio({
 
       <div className="flex min-h-screen flex-col bg-white text-xs md:flex-row">
         <aside className="flex w-full flex-col border-b bg-white md:min-h-screen md:w-[42%] md:border-b-0 md:border-r lg:w-[40%] xl:w-[38%]">
-          <div className="flex flex-1 items-center justify-center px-8 py-10 text-center">
+          <div className="flex flex-1 items-center justify-center px-6 py-6 text-center">
             <div>
-              <h1 className="text-4xl font-bold tracking-tight text-foreground">
+              <h1 className="text-xl font-bold tracking-tight text-foreground">
                 What would you like to automate?
               </h1>
-              <p className="mt-3 text-base text-muted-foreground">
+              <p className="mt-1.5 text-xs text-muted-foreground">
                 Describe your task and let AI build it for you
               </p>
             </div>
@@ -637,7 +637,7 @@ export function WorkflowStudio({
                   }
                 }}
                 placeholder="Describe what you want to automate..."
-                className="min-h-[60px] resize-none border-0 bg-transparent px-0 py-1 text-[15px] shadow-none focus-visible:ring-0"
+                className="min-h-[60px] resize-none border-0 bg-transparent px-0 py-1 text-sm shadow-none focus-visible:ring-0"
               />
               <div className="flex items-center justify-between gap-2 pt-2">
                 <div className="flex items-center gap-1">
@@ -653,7 +653,7 @@ export function WorkflowStudio({
                 </div>
                 <Button
                   size="sm"
-                  className="h-9 rounded-full px-4 text-sm"
+                  className="h-7 rounded-full px-3 text-xs"
                   disabled={generateWorkflowMutation.isPending || !prompt.trim()}
                   onClick={() => generateWorkflowMutation.mutate()}
                 >
@@ -862,10 +862,10 @@ export function WorkflowStudio({
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center md:hidden">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                <h1 className="text-xl font-bold tracking-tight text-foreground">
                   What would you like to automate?
                 </h1>
-                <p className="mt-2 text-sm text-muted-foreground">
+                <p className="mt-1.5 text-xs text-muted-foreground">
                   Describe your task and let AI build it for you
                 </p>
               </div>

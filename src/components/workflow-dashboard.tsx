@@ -134,56 +134,56 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
   }
 
   return (
-    <div className="min-h-screen bg-white px-6 py-8 text-foreground sm:px-10 lg:px-16">
-      <div className="mx-auto max-w-6xl">
+    <div className="min-h-screen bg-white px-4 py-4 text-foreground sm:px-8 lg:px-12">
+      <div className="mx-auto max-w-5xl">
         <div className="flex justify-end">{authEnabled && <UserControls />}</div>
 
-        <section className="pt-8 text-center sm:pt-12">
-          <h1 className="text-balance text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
+        <section className="pt-4 text-center">
+          <h1 className="text-balance text-2xl font-bold tracking-tight text-foreground">
             Automate your work with Workflows
           </h1>
-          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
+          <p className="mt-2 text-xs text-muted-foreground">
             Create Workflow to manage tasks
           </p>
         </section>
 
-        <section className="mt-16">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <h2 className="text-3xl font-bold tracking-tight">My Workflows</h2>
+        <section className="mt-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">My Workflows</h2>
             <div className="flex items-center gap-2">
               <Link
                 href={{ pathname: "/workflows/new", query: { prompt: "" } }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-zinc-50"
+                className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-zinc-50"
               >
-                <Plus className="size-4" />
+                <Plus className="size-3" />
                 New automation
               </Link>
               <Link
                 href={workflows[0] ? `/workflows/${workflows[0]._id}` : "/workflows/new"}
-                className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                className="inline-flex items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 View All
-                <ChevronRight className="size-4" />
+                <ChevronRight className="size-3" />
               </Link>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-border bg-white">
+          <div className="rounded border border-border bg-white">
             {workflows.length === 0 ? (
-              <div className="flex min-h-44 items-center justify-center px-6 py-10 text-center">
-                <div className="space-y-2">
-                  <div className="mx-auto flex size-10 items-center justify-center rounded-full border border-border text-muted-foreground">
-                    <Sparkles className="size-4" />
+              <div className="flex min-h-32 items-center justify-center px-4 py-6 text-center">
+                <div className="space-y-1.5">
+                  <div className="mx-auto flex size-7 items-center justify-center rounded-full border border-border text-muted-foreground">
+                    <Sparkles className="size-3.5" />
                   </div>
-                  <p className="text-2xl font-semibold text-zinc-600">No workflows yet</p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm font-medium text-zinc-600">No workflows yet</p>
+                  <p className="text-xs text-muted-foreground">
                     Create your first workflow to automate your tasks
                   </p>
                   <Link
                     href={{ pathname: "/workflows/new", query: { prompt: "" } }}
-                    className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-zinc-50"
+                    className="mx-auto mt-2 inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-zinc-50"
                   >
-                    <Plus className="size-4" />
+                    <Plus className="size-3" />
                     New automation
                   </Link>
                 </div>
@@ -194,7 +194,7 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
                   <Link
                     key={workflow._id}
                     href={`/workflows/${workflow._id}`}
-                    className="flex flex-col gap-4 px-5 py-4 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-2 px-4 py-2.5 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -235,17 +235,17 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
           </div>
         </section>
 
-        <section className="mt-14 pb-10">
-          <h2 className="text-3xl font-bold tracking-tight">Start from Template</h2>
+        <section className="mt-8 pb-6">
+          <h2 className="text-base font-semibold">Start from Template</h2>
 
-          <div className="mt-5 flex flex-wrap gap-3">
+          <div className="mt-3 flex flex-wrap gap-2">
             {templateFilters.map((filter) => (
               <button
                 key={filter}
                 type="button"
                 onClick={() => setActiveFilter(filter)}
                 className={cn(
-                  "rounded-full border px-4 py-2 text-sm transition-colors",
+                  "rounded-full border px-3 py-1 text-xs transition-colors",
                   activeFilter === filter
                     ? "border-foreground text-foreground"
                     : "border-border text-foreground/80 hover:border-foreground/40",
@@ -256,7 +256,7 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
             ))}
           </div>
 
-          <div className="mt-8 grid gap-4 lg:grid-cols-3">
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
             {visibleTemplates.map((template) => (
               <Link
                 key={template.id}
@@ -264,18 +264,18 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
                   pathname: "/workflows/new",
                   query: { prompt: template.prompt },
                 }}
-                className="rounded-3xl border border-border bg-white p-5 transition-colors hover:bg-zinc-50"
+                className="rounded border border-border bg-white p-3 transition-colors hover:bg-zinc-50"
               >
-                <div className="min-h-28">
-                  <h3 className="text-xl font-semibold tracking-tight text-foreground">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">
                     {template.title}
                   </h3>
-                  <p className="mt-3 line-clamp-3 text-sm leading-7 text-muted-foreground">
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
                     {template.description}
                   </p>
                 </div>
 
-                <div className="mt-6 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-1.5">
                   {template.highlight === "ai" ? (
                     <span className="inline-flex size-5 items-center justify-center text-foreground">
                       <Sparkles className="size-4" />
