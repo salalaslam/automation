@@ -439,7 +439,11 @@ export function WorkflowStudio({
                               : "border-border bg-white hover:bg-gray-50",
                           )}
                         >
-                          <ProviderIcon provider={step.provider} />
+                          {index + 2 === 4 ? (
+                            <Sparkles className="size-3.5 shrink-0 text-violet-600" />
+                          ) : (
+                            <ProviderIcon provider={step.provider} />
+                          )}
                           <span className="font-medium">Step {index + 2}: {step.title}</span>
                           <span
                             className={cn(
