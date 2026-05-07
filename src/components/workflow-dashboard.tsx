@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight, Loader2, Sparkles } from "lucide-react";
+import { ChevronRight, Loader2, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { type IntegrationProvider } from "@/lib/provider-catalog";
@@ -150,13 +150,22 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
         <section className="mt-16">
           <div className="mb-5 flex items-center justify-between gap-4">
             <h2 className="text-3xl font-bold tracking-tight">My Workflows</h2>
-            <Link
-              href={workflows[0] ? `/workflows/${workflows[0]._id}` : "/workflows/new"}
-              className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              View All
-              <ChevronRight className="size-4" />
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href={{ pathname: "/workflows/new", query: { prompt: "" } }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-zinc-50"
+              >
+                <Plus className="size-4" />
+                New automation
+              </Link>
+              <Link
+                href={workflows[0] ? `/workflows/${workflows[0]._id}` : "/workflows/new"}
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                View All
+                <ChevronRight className="size-4" />
+              </Link>
+            </div>
           </div>
 
           <div className="rounded-3xl border border-border bg-white">
@@ -170,6 +179,13 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
                   <p className="text-sm text-muted-foreground">
                     Create your first workflow to automate your tasks
                   </p>
+                  <Link
+                    href={{ pathname: "/workflows/new", query: { prompt: "" } }}
+                    className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-zinc-50"
+                  >
+                    <Plus className="size-4" />
+                    New automation
+                  </Link>
                 </div>
               </div>
             ) : (
