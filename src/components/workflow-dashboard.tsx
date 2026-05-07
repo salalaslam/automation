@@ -47,6 +47,16 @@ const templateFilters: TemplateFilter[] = [
 
 const workflowTemplates: WorkflowTemplate[] = [
   {
+    id: "today-mail-summary",
+    title: "Today's Inbox Summary",
+    description:
+      "Collect today's Gmail and Outlook inbox messages, surface the main senders and topics, and produce one concise recap.",
+    prompt:
+      "Every weekday afternoon, gather today's Gmail and Outlook inbox messages and summarize the important threads, senders, and follow-ups for me.",
+    category: "Productivity assistant",
+    providers: ["gmail", "outlook"],
+  },
+  {
     id: "spam-cleanup",
     title: "Daily Spam Email Cleanup",
     description:

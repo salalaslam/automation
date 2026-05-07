@@ -16,6 +16,7 @@ Workflow studio for Gmail and Outlook built with Next.js App Router, Convex, Tan
 - Turning a workflow on checks required mailbox connections first
 - Gmail and Outlook OAuth is live, including token refresh handling and reconnect state
 - Test runs perform live inbox checks against Gmail and Microsoft Graph before writing run summaries
+- A built-in template can summarize today's Gmail and Outlook inbox messages into one deterministic digest
 - Provider metadata and server runtime helpers are organized so new connectors can plug in later
 - Workflow generation is stubbed with deterministic templates for now
 

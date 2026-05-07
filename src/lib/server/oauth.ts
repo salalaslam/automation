@@ -38,6 +38,26 @@ export type ProviderMailboxSnapshot = {
   stats: string[];
 };
 
+export type MailboxMessage = {
+  id: string;
+  subject: string;
+  from: string;
+  preview: string;
+  receivedAt?: string;
+  isUnread: boolean;
+};
+
+export type ProviderTodayMessageDigest = {
+  provider: IntegrationProvider;
+  summary: string;
+  stats: string[];
+  reviewedCount: number;
+  totalCount?: number;
+  messages: MailboxMessage[];
+};
+
+const TODAY_MESSAGE_LIMIT = 12;
+
 export class ProviderAuthError extends Error {
   constructor(
     readonly provider: IntegrationProvider,
@@ -46,6 +66,124 @@ export class ProviderAuthError extends Error {
     super(message);
     this.name = "ProviderAuthError";
   }
+}
+
+function cleanMailboxValue(value?: string) {
+  if (!value) {
+    return "Unknown";
+  }
+
+  const compact = value.replace(/\s+/g, " ").trim();
+  const namedMatch = compact.match(/^\"?([^\"<]+)\"?\s*<[^>]+>$/);
+
+  if (namedMatch?.[1]) {
+    return namedMatch[1].trim();
+  }
+
+  const emailMatch = compact.match(/<([^>]+)>/);
+
+  return emailMatch?.[1]?.trim() || compact;
+}
+
+function cleanSubject(value?: string) {
+  const compact = value?.replace(/\s+/g, " ").trim();
+
+  if (!compact) {
+    return "No subject";
+  }
+
+  return compact.replace(/^(re|fw|fwd)\s*:\s*/i, "").trim() || "No subject";
+}
+
+function truncatePreview(value?: string, maxLength = 120) {
+  const compact = value?.replace(/\s+/g, " ").trim();
+
+  if (!compact) {
+    return "";
+  }
+
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 1)}...` : compact;
+}
+
+function getTopValues(values: string[], limit: number) {
+  const counts = new Map<string, { value: string; count: number }>();
+
+  for (const value of values) {
+    const normalized = value.trim();
+
+    if (!normalized) {
+      continue;
+    }
+
+    const key = normalized.toLowerCase();
+    const existing = counts.get(key);
+
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    counts.set(key, { value: normalized, count: 1 });
+  }
+
+  return [...counts.values()]
+    .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
+    .slice(0, limit)
+    .map((entry) => entry.value);
+}
+
+function buildTodayDigestSummary(
+  provider: IntegrationProvider,
+  messages: MailboxMessage[],
+  unreadCount: number,
+  totalCount?: number,
+) {
+  if (messages.length === 0) {
+    return `${PROVIDER_META[provider].label}: no inbox messages received today.`;
+  }
+
+  const reviewedLabel =
+    typeof totalCount === "number" && totalCount > messages.length
+      ? `Reviewed the latest ${messages.length} of ${totalCount} messages received today`
+      : `Reviewed ${messages.length} messages received today`;
+  const topSenders = getTopValues(messages.map((message) => cleanMailboxValue(message.from)), 2);
+  const topSubjects = getTopValues(messages.map((message) => cleanSubject(message.subject)), 3);
+  const urgentCount = messages.filter((message) =>
+    /urgent|asap|follow up|follow-up|action required|deadline/i.test(
+      `${message.subject} ${message.preview}`,
+    ),
+  ).length;
+  const parts = [
+    `${PROVIDER_META[provider].label}: ${reviewedLabel}.`,
+    unreadCount > 0
+      ? `${unreadCount} unread in the reviewed set.`
+      : "No unread mail in the reviewed set.",
+    topSenders.length > 0 ? `Top senders: ${topSenders.join(", ")}.` : "",
+    topSubjects.length > 0 ? `Main topics: ${topSubjects.join("; ")}.` : "",
+    urgentCount > 0
+      ? `${urgentCount} thread${urgentCount === 1 ? " looks" : "s look"} time-sensitive.`
+      : "",
+  ].filter(Boolean);
+
+  return parts.join(" ");
+}
+
+function getTodayRange() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  return { start, end };
+}
+
+function getHeaderValue(
+  headers: Array<{ name?: string; value?: string }> | undefined,
+  headerName: string,
+) {
+  return headers?.find((header) => header.name?.toLowerCase() === headerName.toLowerCase())
+    ?.value;
 }
 
 function getBaseUrl(request: NextRequest) {
@@ -351,5 +489,167 @@ export async function fetchProviderMailboxSnapshot(
       `${inbox.unreadItemCount ?? 0} unread`,
       `${inbox.totalItemCount ?? 0} total inbox items`,
     ],
+  };
+}
+
+export async function fetchProviderTodayMessageDigest(
+  provider: IntegrationProvider,
+  accessToken: string,
+): Promise<ProviderTodayMessageDigest> {
+  if (provider === "gmail") {
+    const { start } = getTodayRange();
+    const query = new URLSearchParams({
+      q: `after:${Math.floor(start.getTime() / 1000) - 1}`,
+      maxResults: String(TODAY_MESSAGE_LIMIT),
+    });
+    query.append("labelIds", "INBOX");
+
+    const listResponse = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?${query.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        cache: "no-store",
+      },
+    );
+
+    await assertProviderResponse(
+      provider,
+      listResponse,
+      "Unable to list today's Gmail messages.",
+    );
+
+    const listPayload = (await listResponse.json()) as {
+      messages?: Array<{ id: string }>;
+      resultSizeEstimate?: number;
+    };
+    const listedMessages = listPayload.messages ?? [];
+    const messages = await Promise.all(
+      listedMessages.map(async ({ id }) => {
+        const metadataQuery = new URLSearchParams({ format: "metadata" });
+        metadataQuery.append("metadataHeaders", "Subject");
+        metadataQuery.append("metadataHeaders", "From");
+        metadataQuery.append("metadataHeaders", "Date");
+
+        const messageResponse = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?${metadataQuery.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            cache: "no-store",
+          },
+        );
+
+        await assertProviderResponse(
+          provider,
+          messageResponse,
+          "Unable to load Gmail message metadata.",
+        );
+
+        const payload = (await messageResponse.json()) as {
+          id?: string;
+          snippet?: string;
+          labelIds?: string[];
+          payload?: {
+            headers?: Array<{ name?: string; value?: string }>;
+          };
+        };
+
+        return {
+          id: payload.id ?? id,
+          subject: cleanSubject(getHeaderValue(payload.payload?.headers, "Subject")),
+          from: cleanMailboxValue(getHeaderValue(payload.payload?.headers, "From")),
+          preview: truncatePreview(payload.snippet),
+          receivedAt: getHeaderValue(payload.payload?.headers, "Date"),
+          isUnread: payload.labelIds?.includes("UNREAD") ?? false,
+        } satisfies MailboxMessage;
+      }),
+    );
+    const unreadCount = messages.filter((message) => message.isUnread).length;
+
+    return {
+      provider,
+      summary: buildTodayDigestSummary(
+        provider,
+        messages,
+        unreadCount,
+        listPayload.resultSizeEstimate,
+      ),
+      stats: [
+        `${messages.length} reviewed`,
+        `${unreadCount} unread in sample`,
+        typeof listPayload.resultSizeEstimate === "number"
+          ? `${listPayload.resultSizeEstimate} total matched today`
+          : `${messages.length} sampled for digest`,
+      ],
+      reviewedCount: messages.length,
+      totalCount: listPayload.resultSizeEstimate,
+      messages,
+    };
+  }
+
+  const { start, end } = getTodayRange();
+  const query = new URLSearchParams({
+    $select: "subject,from,receivedDateTime,bodyPreview,isRead",
+    $filter: `receivedDateTime ge ${start.toISOString()} and receivedDateTime lt ${end.toISOString()}`,
+    $orderby: "receivedDateTime desc",
+    $top: String(TODAY_MESSAGE_LIMIT),
+  });
+  const response = await fetch(
+    `https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?${query.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Prefer: 'outlook.body-content-type="text"',
+      },
+      cache: "no-store",
+    },
+  );
+
+  await assertProviderResponse(
+    provider,
+    response,
+    "Unable to list today's Outlook messages.",
+  );
+
+  const payload = (await response.json()) as {
+    value?: Array<{
+      id?: string;
+      subject?: string;
+      from?: {
+        emailAddress?: {
+          name?: string;
+          address?: string;
+        };
+      };
+      receivedDateTime?: string;
+      bodyPreview?: string;
+      isRead?: boolean;
+    }>;
+  };
+  const messages = (payload.value ?? []).map((message) => ({
+    id: message.id ?? randomUUID(),
+    subject: cleanSubject(message.subject),
+    from: cleanMailboxValue(
+      message.from?.emailAddress?.name ?? message.from?.emailAddress?.address,
+    ),
+    preview: truncatePreview(message.bodyPreview),
+    receivedAt: message.receivedDateTime,
+    isUnread: !message.isRead,
+  } satisfies MailboxMessage));
+  const unreadCount = messages.filter((message) => message.isUnread).length;
+
+  return {
+    provider,
+    summary: buildTodayDigestSummary(provider, messages, unreadCount),
+    stats: [
+      `${messages.length} reviewed`,
+      `${unreadCount} unread in sample`,
+      `${messages.length} sampled for digest`,
+    ],
+    reviewedCount: messages.length,
+    messages,
   };
 }

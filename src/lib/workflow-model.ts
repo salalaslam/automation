@@ -126,6 +126,70 @@ function normalizePrompt(prompt: string) {
   return prompt.trim().replace(/\s+/g, " ");
 }
 
+function isTodayMessagesSummaryPrompt(prompt: string) {
+  return /\btoday'?s?\b/i.test(prompt)
+    && /\b(messages?|emails?|mail)\b/i.test(prompt)
+    && /\b(summary|summarize|digest|recap|brief)\b/i.test(prompt);
+}
+
+function buildTodayMessagesSummaryWorkflow(
+  prompt: string,
+  requirements: IntegrationProvider[],
+): WorkflowDraftInput {
+  const providerLabel = requirements
+    .map((provider) => PROVIDER_META[provider].label.replace(" Email", ""))
+    .join(" + ");
+  const finalProvider = requirements[0];
+  const steps: WorkflowStep[] = [
+    ...requirements.map((provider, index) => ({
+      id: `${slug(`collect ${provider} today messages`)}-${index + 1}`,
+      provider,
+      kind: "ingest",
+      title: `Collect today's ${PROVIDER_META[provider].label.replace(" Email", "")} messages`,
+      detail:
+        provider === "gmail"
+          ? "Pull Gmail inbox messages received today with sender, subject, and preview metadata."
+          : "Pull Outlook inbox messages received today with sender, subject, and preview metadata.",
+      status: "ready" as const,
+      configSummary: [
+        "Filters inbox mail received since local midnight",
+        "Captures sender, subject, timestamp, and preview text",
+      ],
+    })),
+    {
+      id: `${slug("summarize today inbox activity")}-${requirements.length + 1}`,
+      provider: finalProvider,
+      kind: "digest",
+      title: "Summarize today's inbox activity",
+      detail:
+        "Combine Gmail and Outlook messages into one concise digest with key senders, topics, and likely follow-ups.",
+      status: "attention",
+      configSummary: [
+        "Produces a deterministic cross-provider summary",
+        "Highlights urgent threads and repeated senders first",
+      ],
+    },
+  ];
+
+  return {
+    name: `Summarize today's ${providerLabel} messages`,
+    description: prompt,
+    prompt,
+    status: "draft",
+    requirements,
+    trigger: {
+      label: "Today's inbox digest",
+      cadence: "Weekdays at 17:30",
+    },
+    steps,
+    lastRunSummary: {
+      status: "pending",
+      message: "Workflow drafted. Test run to generate a same-day inbox summary.",
+      timestamp: Date.now(),
+    },
+  };
+}
+
 export function deriveProvidersFromPrompt(
   prompt: string,
 ): IntegrationProvider[] {
@@ -134,7 +198,7 @@ export function deriveProvidersFromPrompt(
   const wantsOutlook = /outlook|microsoft|office 365/i.test(normalized);
 
   if (wantsGmail && wantsOutlook) {
-    return ["outlook", "gmail"];
+    return ["gmail", "outlook"];
   }
 
   if (wantsOutlook) {
@@ -151,6 +215,11 @@ export function deriveProvidersFromPrompt(
 export function buildStubWorkflow(prompt: string): WorkflowDraftInput {
   const normalized = normalizePrompt(prompt);
   const requirements = deriveProvidersFromPrompt(normalized);
+
+  if (isTodayMessagesSummaryPrompt(normalized)) {
+    return buildTodayMessagesSummaryWorkflow(normalized, requirements);
+  }
+
   const stepSeed = requirements.flatMap((provider) => STEP_LIBRARY[provider].slice(0, 2));
   const finalProvider = requirements[0];
   const digestStep = STEP_LIBRARY[finalProvider][2];
