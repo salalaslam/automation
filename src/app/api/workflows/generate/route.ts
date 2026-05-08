@@ -43,7 +43,11 @@ async function createWorkflowFromPrompt(args: SaveWorkflowArgs) {
       throw error;
     }
 
-    const { assistantMessage: _assistantMessage, ...legacyArgs } = args;
+    const legacyArgs = {
+      ownerId: args.ownerId,
+      prompt: args.prompt,
+      workflow: args.workflow,
+    };
 
     return convexMutation<
       Omit<SaveWorkflowArgs, "assistantMessage">,
@@ -65,7 +69,12 @@ async function replaceWorkflowFromPrompt(
       throw error;
     }
 
-    const { assistantMessage: _assistantMessage, ...legacyArgs } = args;
+    const legacyArgs = {
+      ownerId: args.ownerId,
+      workflowId: args.workflowId,
+      prompt: args.prompt,
+      workflow: args.workflow,
+    };
 
     return convexMutation<
       Omit<SaveWorkflowArgs, "assistantMessage"> & { workflowId: string },
