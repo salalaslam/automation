@@ -168,71 +168,67 @@ export function WorkflowDashboard({ authEnabled }: WorkflowDashboardProps) {
             </div>
           </div>
 
-          <div className="rounded border border-border bg-white">
-            {workflows.length === 0 ? (
-              <div className="flex min-h-32 items-center justify-center px-4 py-6 text-center">
-                <div className="space-y-1.5">
-                  <div className="mx-auto flex size-7 items-center justify-center rounded-full border border-border text-muted-foreground">
-                    <Sparkles className="size-3.5" />
-                  </div>
-                  <p className="text-sm font-medium text-zinc-600">No workflows yet</p>
-                  <p className="text-xs text-muted-foreground">
-                    Create your first workflow to automate your tasks
-                  </p>
-                  <Link
-                    href={{ pathname: "/workflows/new", query: { prompt: "" } }}
-                    className="mx-auto mt-2 inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-zinc-50"
-                  >
-                    <Plus className="size-3" />
-                    New automation
-                  </Link>
+          {workflows.length === 0 ? (
+            <div className="flex min-h-32 items-center justify-center px-4 py-6 text-center">
+              <div className="space-y-1.5">
+                <div className="mx-auto flex size-7 items-center justify-center rounded-full border border-border text-muted-foreground">
+                  <Sparkles className="size-3.5" />
                 </div>
+                <p className="text-sm font-medium text-zinc-600">No workflows yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Create your first workflow to automate your tasks
+                </p>
+                <Link
+                  href={{ pathname: "/workflows/new", query: { prompt: "" } }}
+                  className="mx-auto mt-2 inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-zinc-50"
+                >
+                  <Plus className="size-3" />
+                  New automation
+                </Link>
               </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {workflows.map((workflow) => (
-                  <Link
-                    key={workflow._id}
-                    href={`/workflows/${workflow._id}`}
-                    className="flex flex-col gap-2 px-4 py-2.5 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {workflow.name}
-                        </span>
-                        <span
-                          className={cn(
-                            "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize",
-                            workflow.status === "active"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-gray-100 text-muted-foreground",
-                          )}
-                        >
-                          {workflow.status}
-                        </span>
-                      </div>
-                      <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">
-                        {workflow.description}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4 sm:shrink-0">
-                      <div className="flex items-center gap-2">
-                        {workflow.requirements.map((provider) => (
-                          <span key={provider} className="inline-flex items-center gap-1">
-                            <ProviderIcon provider={provider} />
-                          </span>
-                        ))}
-                      </div>
-                      <span className="text-[11px] text-muted-foreground">
-                        Updated {formatTimestamp(workflow.updatedAt)}
+            </div>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-3">
+              {workflows.map((workflow) => (
+                <Link
+                  key={workflow._id}
+                  href={`/workflows/${workflow._id}`}
+                  className="rounded border border-border bg-white p-3 transition-colors hover:bg-zinc-50"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="truncate text-sm font-semibold text-foreground">
+                        {workflow.name}
+                      </h3>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium capitalize",
+                          workflow.status === "active"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-gray-100 text-muted-foreground",
+                        )}
+                      >
+                        {workflow.status}
                       </span>
                     </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                      {workflow.description}
+                    </p>
+                  </div>
+                  <div className="mt-3 flex items-center gap-1.5">
+                    {workflow.requirements.map((provider) => (
+                      <span key={provider} className="inline-flex items-center gap-1">
+                        <ProviderIcon provider={provider} />
+                      </span>
+                    ))}
+                    <span className="ml-auto text-[11px] text-muted-foreground">
+                      Updated {formatTimestamp(workflow.updatedAt)}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="mt-8 pb-6">
