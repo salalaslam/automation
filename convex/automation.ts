@@ -12,6 +12,7 @@ const stepProviderValidator = v.union(
   v.literal("slack"),
   v.literal("salesforce"),
   v.literal("google-calendar"),
+  v.literal("ai"),
 );
 const workflowStatusValidator = v.union(v.literal("draft"), v.literal("active"));
 const stepStatusValidator = v.union(v.literal("ready"), v.literal("attention"));
