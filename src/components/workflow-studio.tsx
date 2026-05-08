@@ -211,7 +211,9 @@ function upsertDashboardWorkflow(
   };
 }
 
-function getWorkflowChatMessages(workflow: WorkflowRecord | null) {
+function getWorkflowChatMessages(
+  workflow: WorkflowRecord | null,
+): StudioChatMessage[] {
   if (!workflow) {
     return [];
   }
@@ -493,7 +495,7 @@ export function WorkflowStudio({
     [selectedWorkflow],
   );
 
-  const displayedChatMessages = useMemo(() => {
+  const displayedChatMessages = useMemo<StudioChatMessage[]>(() => {
     if (selectedWorkflow) {
       if (
         transientChat.mode === "append"
