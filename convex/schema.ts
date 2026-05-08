@@ -43,12 +43,20 @@ const runSummaryValidator = v.object({
   timestamp: v.number(),
 });
 
+const chatMessageValidator = v.object({
+  id: v.string(),
+  role: v.union(v.literal("user"), v.literal("assistant")),
+  content: v.string(),
+  createdAt: v.number(),
+});
+
 export default defineSchema({
   workflows: defineTable({
     ownerId: v.string(),
     name: v.string(),
     description: v.string(),
     prompt: v.string(),
+    chatMessages: v.optional(v.array(chatMessageValidator)),
     status: workflowStatusValidator,
     requirements: v.array(integrationProviderValidator),
     trigger: v.object({

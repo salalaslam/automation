@@ -65,6 +65,47 @@ const PROVIDER_LABELS = {
   outlook: "Outlook Email",
 } as const;
 
+function buildWorkflowAssistantReply(workflow: {
+  name: string;
+  requirements: Array<"gmail" | "outlook">;
+  steps: Array<unknown>;
+}) {
+  const providerSummary =
+    workflow.requirements.length > 0
+      ? ` across ${workflow.requirements
+          .map((provider) => PROVIDER_LABELS[provider].replace(" Email", ""))
+          .join(" + ")}`
+      : "";
+  const stepLabel = workflow.steps.length === 1 ? "step" : "steps";
+
+  return `Generated workflow \"${workflow.name}\" with ${workflow.steps.length} ${stepLabel}${providerSummary}. Review the draft on the right and keep chatting to refine it.`;
+}
+
+function buildWorkflowChatTranscript(
+  prompt: string,
+  workflow: {
+    name: string;
+    requirements: Array<"gmail" | "outlook">;
+    steps: Array<unknown>;
+  },
+  createdAt = Date.now(),
+) {
+  return [
+    {
+      id: `user-${createdAt}`,
+      role: "user" as const,
+      content: prompt,
+      createdAt,
+    },
+    {
+      id: `assistant-${createdAt + 1}`,
+      role: "assistant" as const,
+      content: buildWorkflowAssistantReply(workflow),
+      createdAt: createdAt + 1,
+    },
+  ];
+}
+
 function isConnectionReady(connection: { status: "connected" | "disconnected" | "needs_reconnect" }) {
   return connection.status === "connected";
 }
@@ -111,7 +152,7 @@ function getConnectedProviders(
 function seedWorkflowDraft() {
   const now = Date.now();
 
-  return {
+  const workflow = {
     name: "Triage Gmail + Outlook mail",
     description:
       "Clean Gmail and Outlook inboxes every morning and send a short recap after deterministic cleanup steps finish.",
@@ -166,6 +207,11 @@ function seedWorkflowDraft() {
       message: "Workspace seeded. Test run to simulate deterministic execution.",
       timestamp: now,
     },
+  };
+
+  return {
+    ...workflow,
+    chatMessages: buildWorkflowChatTranscript(workflow.prompt, workflow, now),
   };
 }
 
@@ -262,6 +308,7 @@ export const createWorkflowFromPrompt = mutation({
   args: {
     ownerId: v.string(),
     prompt: v.string(),
+    assistantMessage: v.string(),
     workflow: workflowDraftValidator,
   },
   handler: async (ctx, args) => {
@@ -272,6 +319,20 @@ export const createWorkflowFromPrompt = mutation({
       prompt: args.prompt,
       createdAt: now,
       updatedAt: now,
+      chatMessages: [
+        {
+          id: `user-${now}`,
+          role: "user",
+          content: args.prompt,
+          createdAt: now,
+        },
+        {
+          id: `assistant-${now + 1}`,
+          role: "assistant",
+          content: args.assistantMessage,
+          createdAt: now + 1,
+        },
+      ],
       lastRunSummary: args.workflow.lastRunSummary ?? {
         status: "pending",
         message: "Workflow drafted from stub planner.",
@@ -280,6 +341,53 @@ export const createWorkflowFromPrompt = mutation({
     });
 
     return ctx.db.get(workflowId);
+  },
+});
+
+export const replaceWorkflowFromPrompt = mutation({
+  args: {
+    ownerId: v.string(),
+    workflowId: v.id("workflows"),
+    prompt: v.string(),
+    assistantMessage: v.string(),
+    workflow: workflowDraftValidator,
+  },
+  handler: async (ctx, args) => {
+    const workflow = await ctx.db.get(args.workflowId);
+
+    if (!workflow || workflow.ownerId !== args.ownerId) {
+      throw new Error("Workflow not found.");
+    }
+
+    const now = Date.now();
+
+    await ctx.db.patch(args.workflowId, {
+      ...args.workflow,
+      prompt: args.prompt,
+      updatedAt: now,
+      chatMessages: [
+        ...(workflow.chatMessages ?? []),
+        {
+          id: `user-${now}`,
+          role: "user",
+          content: args.prompt,
+          createdAt: now,
+        },
+        {
+          id: `assistant-${now + 1}`,
+          role: "assistant",
+          content: args.assistantMessage,
+          createdAt: now + 1,
+        },
+      ],
+      lastRunSummary: args.workflow.lastRunSummary ?? {
+        status: "pending",
+        message: "Workflow updated from prompt.",
+        timestamp: now,
+      },
+    });
+
+    return ctx.db.get(args.workflowId);
   },
 });
 

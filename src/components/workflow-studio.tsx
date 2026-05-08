@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -41,6 +41,8 @@ import {
   type DashboardData,
   STEP_OPTION_GROUPS,
   STEP_PROVIDER_META,
+  createWorkflowChatTranscript,
+  type WorkflowChatMessage,
   type WorkflowRecord,
   type WorkflowRunSummary,
   type StepProvider,
@@ -103,12 +105,23 @@ type TestRunResponse = {
 
 type GeneratedWorkflowResponse = {
   workflow: WorkflowRecord;
+  assistantMessage: string;
 };
 
 type ReorderWorkflowStepsResponse = {
   workflowId: string;
   steps: WorkflowStep[];
   updatedAt: number;
+};
+
+type StudioChatMessage = WorkflowChatMessage & {
+  pending?: boolean;
+};
+
+type TransientChatState = {
+  workflowId?: string;
+  mode: "append" | "replace";
+  messages: StudioChatMessage[];
 };
 
 type DropPlacement = "before" | "after";
@@ -178,6 +191,54 @@ function updateDashboardWorkflowSteps(
   };
 }
 
+function upsertDashboardWorkflow(
+  dashboard: DashboardData | undefined,
+  workflow: WorkflowRecord,
+) {
+  if (!dashboard) {
+    return dashboard;
+  }
+
+  const remainingWorkflows = dashboard.workflows.filter(
+    (entry) => entry._id !== workflow._id,
+  );
+
+  return {
+    ...dashboard,
+    workflows: [workflow, ...remainingWorkflows].sort(
+      (left, right) => right.updatedAt - left.updatedAt,
+    ),
+  };
+}
+
+function getWorkflowChatMessages(workflow: WorkflowRecord | null) {
+  if (!workflow) {
+    return [];
+  }
+
+  if (workflow.chatMessages && workflow.chatMessages.length > 0) {
+    return workflow.chatMessages;
+  }
+
+  return createWorkflowChatTranscript(workflow.prompt, workflow, workflow.createdAt);
+}
+
+function createStudioChatMessage(
+  role: "user" | "assistant",
+  content: string,
+  pending = false,
+): StudioChatMessage {
+  const createdAt = Date.now();
+
+  return {
+    id: `${role}-${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    content,
+    createdAt,
+    pending,
+  };
+}
+
 export function WorkflowStudio({
   authEnabled,
   workflowId,
@@ -202,6 +263,11 @@ export function WorkflowStudio({
     stepId: string;
     placement: DropPlacement;
   } | null>(null);
+  const [transientChat, setTransientChat] = useState<TransientChatState>({
+    mode: "replace",
+    messages: [],
+  });
+  const chatViewportRef = useRef<HTMLDivElement | null>(null);
 
   const cleanSearch = useMemo(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -213,19 +279,63 @@ export function WorkflowStudio({
   const returnTo = cleanSearch ? `${pathname}?${cleanSearch}` : pathname;
 
   const generateWorkflowMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: ({
+      nextPrompt,
+      targetWorkflowId,
+    }: {
+      nextPrompt: string;
+      targetWorkflowId?: string;
+      pendingMessageId: string;
+    }) =>
       requestJson<GeneratedWorkflowResponse>("/api/workflows/generate", {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt: nextPrompt,
+          workflowId: targetWorkflowId,
+        }),
       }),
-    onSuccess: ({ workflow }) => {
+    onSuccess: ({ workflow }, variables) => {
       setSelectedStepId(null);
-      setBanner("Stub workflow created.");
+      setBanner(
+        variables.targetWorkflowId ? "Workflow updated." : "Workflow created.",
+      );
+      setTransientChat(
+        variables.targetWorkflowId
+          ? {
+              mode: "replace",
+              messages: [],
+            }
+          : {
+              workflowId: workflow._id,
+              mode: "replace",
+              messages: getWorkflowChatMessages(workflow),
+            },
+      );
+      queryClient.setQueryData<DashboardData>(["dashboard"], (currentDashboard) =>
+        upsertDashboardWorkflow(currentDashboard, workflow),
+      );
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      router.replace(`/workflows/${workflow._id}`);
+      if (workflowId !== workflow._id) {
+        router.replace(`/workflows/${workflow._id}`);
+      }
     },
-    onError: (error) => {
-      setBanner(getMutationErrorMessage(error));
+    onError: (error, variables) => {
+      const message = getMutationErrorMessage(error);
+
+      setBanner(message);
+      setPrompt((currentPrompt) => currentPrompt || variables.nextPrompt);
+      setTransientChat((currentChat) => ({
+        ...currentChat,
+        messages: currentChat.messages.map((entry) =>
+          entry.id === variables.pendingMessageId
+            ? {
+                ...entry,
+                content: message,
+                pending: false,
+              }
+            : entry,
+        ),
+      }));
     },
   });
 
@@ -378,6 +488,37 @@ export function WorkflowStudio({
     [workflowId, workflows],
   );
 
+  const persistedChatMessages = useMemo(
+    () => getWorkflowChatMessages(selectedWorkflow),
+    [selectedWorkflow],
+  );
+
+  const displayedChatMessages = useMemo(() => {
+    if (selectedWorkflow) {
+      if (
+        transientChat.mode === "append"
+        && transientChat.workflowId === selectedWorkflow._id
+      ) {
+        return [...persistedChatMessages, ...transientChat.messages];
+      }
+
+      return persistedChatMessages;
+    }
+
+    return transientChat.messages;
+  }, [persistedChatMessages, selectedWorkflow, transientChat]);
+
+  useEffect(() => {
+    if (!chatViewportRef.current) {
+      return;
+    }
+
+    chatViewportRef.current.scrollTo({
+      top: chatViewportRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [displayedChatMessages]);
+
   const selectedStep = useMemo(
     () =>
       selectedStepId && selectedStepId !== TRIGGER_ID
@@ -464,6 +605,34 @@ export function WorkflowStudio({
     reorderWorkflowStepsMutation.mutate({
       targetWorkflowId: selectedWorkflow._id,
       orderedStepIds,
+    });
+  };
+
+  const handleGenerate = () => {
+    const nextPrompt = prompt.trim();
+
+    if (!nextPrompt || generateWorkflowMutation.isPending) {
+      return;
+    }
+
+    const userMessage = createStudioChatMessage("user", nextPrompt);
+    const pendingAssistantMessage = createStudioChatMessage(
+      "assistant",
+      "Thinking through the workflow...",
+      true,
+    );
+
+    setBanner(null);
+    setPrompt("");
+    setTransientChat({
+      workflowId: selectedWorkflow?._id,
+      mode: selectedWorkflow ? "append" : "replace",
+      messages: [userMessage, pendingAssistantMessage],
+    });
+    generateWorkflowMutation.mutate({
+      nextPrompt,
+      targetWorkflowId: selectedWorkflow?._id,
+      pendingMessageId: pendingAssistantMessage.id,
     });
   };
 
@@ -615,14 +784,59 @@ export function WorkflowStudio({
 
       <div className="flex min-h-screen flex-col bg-white text-xs md:flex-row">
         <aside className="flex w-full flex-col border-b bg-white md:min-h-screen md:w-[42%] md:border-b-0 md:border-r lg:w-[40%] xl:w-[38%]">
-          <div className="flex flex-1 items-center justify-center px-6 py-6 text-center">
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-foreground">
-                What would you like to automate?
-              </h1>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Describe your task and let AI build it for you
-              </p>
+          <div ref={chatViewportRef} className="flex-1 overflow-y-auto px-4 py-5">
+            <div className="mx-auto flex min-h-full max-w-lg flex-col gap-4">
+              {displayedChatMessages.length > 0 ? (
+                displayedChatMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={cn(
+                      "flex",
+                      message.role === "user" ? "justify-end" : "justify-start",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "max-w-[88%] rounded-3xl px-4 py-3 shadow-sm",
+                        message.role === "user"
+                          ? "bg-slate-900 text-white"
+                          : "border border-slate-200 bg-white text-slate-900",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "mb-1 text-[10px] font-semibold uppercase tracking-[0.18em]",
+                          message.role === "user"
+                            ? "text-slate-300"
+                            : "text-slate-500",
+                        )}
+                      >
+                        {message.role === "user" ? "You" : "Copilot"}
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm leading-6">
+                        {message.content}
+                      </p>
+                      {message.pending && (
+                        <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <Loader2 className="size-3 animate-spin" />
+                          Thinking
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex flex-1 items-center justify-center px-6 py-6 text-center">
+                  <div>
+                    <h1 className="text-xl font-bold tracking-tight text-foreground">
+                      What would you like to automate?
+                    </h1>
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Describe your task and let AI build it for you
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -634,7 +848,7 @@ export function WorkflowStudio({
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey && prompt.trim()) {
                     event.preventDefault();
-                    generateWorkflowMutation.mutate();
+                    handleGenerate();
                   }
                 }}
                 placeholder="Describe what you want to automate..."
@@ -656,14 +870,14 @@ export function WorkflowStudio({
                   size="sm"
                   className="h-7 rounded-full px-3 text-xs"
                   disabled={generateWorkflowMutation.isPending || !prompt.trim()}
-                  onClick={() => generateWorkflowMutation.mutate()}
+                  onClick={handleGenerate}
                 >
                   {generateWorkflowMutation.isPending ? (
                     <Loader2 className="size-3 animate-spin" />
                   ) : (
                     <Sparkles className="size-3" />
                   )}
-                  Generate
+                  Send
                 </Button>
               </div>
             </div>

@@ -392,6 +392,15 @@ export type StepStatus = "ready" | "attention";
 
 export type RunStatus = "success" | "pending" | "needs_auth" | "error";
 
+export type WorkflowChatRole = "user" | "assistant";
+
+export type WorkflowChatMessage = {
+  id: string;
+  role: WorkflowChatRole;
+  content: string;
+  createdAt: number;
+};
+
 export type WorkflowTrigger = {
   label: string;
   cadence: string;
@@ -418,6 +427,7 @@ export type WorkflowRecord = {
   name: string;
   description: string;
   prompt: string;
+  chatMessages?: WorkflowChatMessage[];
   status: WorkflowStatus;
   requirements: IntegrationProvider[];
   trigger: WorkflowTrigger;
@@ -540,6 +550,45 @@ function normalizePrompt(prompt: string) {
   return prompt.trim().replace(/\s+/g, " ");
 }
 
+export function buildWorkflowAssistantReply(
+  workflow: Pick<WorkflowRecord, "name" | "requirements" | "steps">,
+) {
+  const providerLabels = workflow.requirements.map((provider) =>
+    PROVIDER_META[provider].label.replace(" Email", ""),
+  );
+
+  const providerSummary =
+    providerLabels.length > 0
+      ? ` across ${providerLabels.join(" + ")}`
+      : "";
+  const stepLabel = workflow.steps.length === 1 ? "step" : "steps";
+
+  return `Generated workflow \"${workflow.name}\" with ${workflow.steps.length} ${stepLabel}${providerSummary}. Review the draft on the right and keep chatting to refine it.`;
+}
+
+export function createWorkflowChatTranscript(
+  prompt: string,
+  workflow: Pick<WorkflowRecord, "name" | "requirements" | "steps">,
+  createdAt = Date.now(),
+): WorkflowChatMessage[] {
+  const normalizedPrompt = normalizePrompt(prompt);
+
+  return [
+    {
+      id: `user-${createdAt}`,
+      role: "user",
+      content: normalizedPrompt,
+      createdAt,
+    },
+    {
+      id: `assistant-${createdAt + 1}`,
+      role: "assistant",
+      content: buildWorkflowAssistantReply(workflow),
+      createdAt: createdAt + 1,
+    },
+  ];
+}
+
 function isTodayMessagesSummaryPrompt(prompt: string) {
   return /\btoday'?s?\b/i.test(prompt)
     && /\b(messages?|emails?|mail)\b/i.test(prompt)
@@ -553,7 +602,6 @@ function buildTodayMessagesSummaryWorkflow(
   const providerLabel = requirements
     .map((provider) => PROVIDER_META[provider].label.replace(" Email", ""))
     .join(" + ");
-  const finalProvider = requirements[0];
   const steps: WorkflowStep[] = [
     ...requirements.map((provider, index) => ({
       id: `${slug(`collect ${provider} today messages`)}-${index + 1}`,
