@@ -712,11 +712,14 @@ export function WorkflowStudio({
             </div>
           </header>
 
-          {(banner ?? oauthBanner) && (
-            <div className="border-b bg-blue-50 px-3 py-1.5 text-[11px] text-blue-700">
-              {banner ?? oauthBanner}
-            </div>
-          )}
+          <div
+            className={cn(
+              "border-b px-3 py-1.5 text-[11px]",
+              (banner ?? oauthBanner) ? "bg-blue-50 text-blue-700" : "invisible",
+            )}
+          >
+            {banner ?? oauthBanner}
+          </div>
 
           {selectedWorkflow ? (
             <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -917,8 +920,11 @@ export function WorkflowStudio({
           )}
         </main>
 
-        {showRightPanel && selectedWorkflow && (
-          <aside className="flex w-full shrink-0 flex-col border-t bg-white md:w-72 md:border-l md:border-t-0">
+        {selectedWorkflow && (
+          <aside className={cn(
+            "flex w-full shrink-0 flex-col border-t bg-white md:w-72 md:border-l md:border-t-0",
+            !showRightPanel && "hidden md:flex md:invisible",
+          )}>
             {showTriggerPanel && (
               <>
                 <div className="flex h-10 items-center justify-between border-b px-3">
