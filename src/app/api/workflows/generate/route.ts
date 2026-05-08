@@ -16,6 +16,64 @@ const workflowPromptSchema = z.object({
   workflowId: z.string().optional(),
 });
 
+type SaveWorkflowArgs = {
+  ownerId: string;
+  prompt: string;
+  assistantMessage: string;
+  workflow: WorkflowDraftInput;
+};
+
+function isLegacyAssistantMessageValidationError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.includes("ArgumentValidationError") &&
+    error.message.includes("assistantMessage") &&
+    error.message.includes("extra field")
+  );
+}
+
+async function createWorkflowFromPrompt(args: SaveWorkflowArgs) {
+  try {
+    return await convexMutation<SaveWorkflowArgs, WorkflowRecord>(
+      "automation:createWorkflowFromPrompt",
+      args,
+    );
+  } catch (error) {
+    if (!isLegacyAssistantMessageValidationError(error)) {
+      throw error;
+    }
+
+    const { assistantMessage: _assistantMessage, ...legacyArgs } = args;
+
+    return convexMutation<
+      Omit<SaveWorkflowArgs, "assistantMessage">,
+      WorkflowRecord
+    >("automation:createWorkflowFromPrompt", legacyArgs);
+  }
+}
+
+async function replaceWorkflowFromPrompt(
+  args: SaveWorkflowArgs & { workflowId: string },
+) {
+  try {
+    return await convexMutation<
+      SaveWorkflowArgs & { workflowId: string },
+      WorkflowRecord
+    >("automation:replaceWorkflowFromPrompt", args);
+  } catch (error) {
+    if (!isLegacyAssistantMessageValidationError(error)) {
+      throw error;
+    }
+
+    const { assistantMessage: _assistantMessage, ...legacyArgs } = args;
+
+    return convexMutation<
+      Omit<SaveWorkflowArgs, "assistantMessage"> & { workflowId: string },
+      WorkflowRecord
+    >("automation:replaceWorkflowFromPrompt", legacyArgs);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const ownerId = await getRequestOwnerId();
@@ -24,31 +82,14 @@ export async function POST(request: Request) {
     const assistantMessage = buildWorkflowAssistantReply(workflow);
 
     const savedWorkflow = workflowId
-      ? await convexMutation<
-          {
-            ownerId: string;
-            workflowId: string;
-            prompt: string;
-            assistantMessage: string;
-            workflow: WorkflowDraftInput;
-          },
-          WorkflowRecord
-        >("automation:replaceWorkflowFromPrompt", {
+      ? await replaceWorkflowFromPrompt({
           ownerId,
           workflowId,
           prompt,
           assistantMessage,
           workflow,
         })
-      : await convexMutation<
-          {
-            ownerId: string;
-            prompt: string;
-            assistantMessage: string;
-            workflow: WorkflowDraftInput;
-          },
-          WorkflowRecord
-        >("automation:createWorkflowFromPrompt", {
+      : await createWorkflowFromPrompt({
           ownerId,
           prompt,
           assistantMessage,
