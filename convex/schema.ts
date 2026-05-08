@@ -12,6 +12,7 @@ const stepProviderValidator = v.union(
   v.literal("slack"),
   v.literal("salesforce"),
   v.literal("google-calendar"),
+  v.literal("ai"),
 );
 const connectionStatusValidator = v.union(
   v.literal("connected"),
