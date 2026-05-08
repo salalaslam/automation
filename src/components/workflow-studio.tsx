@@ -74,6 +74,7 @@ const previewStepIcons = {
   slack: MessageSquare,
   salesforce: Database,
   "google-calendar": CalendarDays,
+  ai: Sparkles,
 } as const satisfies Record<Exclude<StepProvider, IntegrationProvider>, typeof FolderOpen>;
 
 type WorkflowStudioProps = {

@@ -15,6 +15,7 @@ export const STEP_PROVIDERS = [
   "slack",
   "salesforce",
   "google-calendar",
+  "ai",
 ] as const;
 
 export type StepProvider = (typeof STEP_PROVIDERS)[number];
@@ -68,6 +69,10 @@ export const STEP_PROVIDER_META: Record<
   },
   "google-calendar": {
     label: "Google Calendar",
+    availability: "preview",
+  },
+  "ai": {
+    label: "AI",
     availability: "preview",
   },
 };
@@ -567,7 +572,7 @@ function buildTodayMessagesSummaryWorkflow(
     })),
     {
       id: `${slug("summarize today inbox activity")}-${requirements.length + 1}`,
-      provider: finalProvider,
+      provider: "ai" as const,
       kind: "digest",
       title: "Summarize today's inbox activity",
       detail:
