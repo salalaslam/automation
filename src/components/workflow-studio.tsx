@@ -784,8 +784,8 @@ export function WorkflowStudio({
 
       <div className="flex min-h-screen flex-col bg-white text-xs md:flex-row">
         <aside className="flex w-full flex-col border-b bg-white md:min-h-screen md:w-[42%] md:border-b-0 md:border-r lg:w-[40%] xl:w-[38%]">
-          <div ref={chatViewportRef} className="flex-1 overflow-y-auto px-4 py-5">
-            <div className="mx-auto flex min-h-full max-w-lg flex-col gap-4">
+          <div ref={chatViewportRef} className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="mx-auto flex min-h-full max-w-lg flex-col gap-2">
               {displayedChatMessages.length > 0 ? (
                 displayedChatMessages.map((message) => (
                   <div
@@ -797,27 +797,17 @@ export function WorkflowStudio({
                   >
                     <div
                       className={cn(
-                        "max-w-[88%] rounded-3xl px-4 py-3 shadow-sm",
+                        "max-w-[82%] rounded-xl px-3 py-2",
                         message.role === "user"
                           ? "bg-slate-900 text-white"
                           : "border border-slate-200 bg-white text-slate-900",
                       )}
                     >
-                      <div
-                        className={cn(
-                          "mb-1 text-[10px] font-semibold uppercase tracking-[0.18em]",
-                          message.role === "user"
-                            ? "text-slate-300"
-                            : "text-slate-500",
-                        )}
-                      >
-                        {message.role === "user" ? "You" : "Copilot"}
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm leading-6">
+                      <p className="whitespace-pre-wrap text-xs leading-5">
                         {message.content}
                       </p>
                       {message.pending && (
-                        <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                           <Loader2 className="size-3 animate-spin" />
                           Thinking
                         </div>
